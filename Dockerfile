@@ -50,7 +50,12 @@ RUN npm ci --omit=dev --ignore-scripts
 FROM node:22-alpine AS runner
 
 # Install dumb-init for proper Linux PID 1 signal forwarding (SIGTERM / SIGINT)
-RUN apk add --no-cache dumb-init
+RUN apk add --no-cache dumb-init && \
+    rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/bin/corepack \
+           /opt/yarn*
 
 ENV NODE_ENV=production \
     PORT=5000 \
