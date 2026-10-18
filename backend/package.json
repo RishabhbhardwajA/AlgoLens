@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "start:prod": "node dist/server.js",
-    "build": "tsc",
+    "build:tracer": "javac --add-modules jdk.jdi -d dist/tracer/java src/tracer/java/com/algolens/tracer/JavaTracer.java",
+    "build": "tsc && npm run build:tracer",
+    "start:worker": "node dist/tracer/java/worker/server.js",
     "test": "tsx tests/auth.test.ts && tsx tests/api.test.ts && tsx tests/execution.test.ts"
   },
   "dependencies": {

@@ -21,23 +21,31 @@ const DEFAULT_LIMITATIONS = [
   "Arrays serialized up to 50 elements",
   "Strings truncated at 256 characters",
   "Stack frame depth limited to 15 frames",
+  "Standard output & error capped at 64KB",
 ];
 
 export class ExecutionService {
-  private executionProvider: ExecutionProvider;
+  private executionProvider: ExecutionProvider | null = null;
   private traceProviders: Map<string, TraceProvider> = new Map();
-  private maxSourceLength: number = 64 * 1024; // 64 KB
-  private maxStdinLength: number = 32 * 1024;  // 32 KB
+  private maxSourceLength: number = 32 * 1024; // 32 KB hard limit
+  private maxStdinLength: number = 16 * 1024;  // 16 KB hard limit
+
+  // Concurrency tracking to prevent resource starvation
+  private activeTraces: number = 0;
+  private readonly maxConcurrentTraces: number = 3;
 
   constructor() {
-    if (config.USE_MOCK_EXECUTION || !config.JUDGE0_API_URL) {
-      this.executionProvider = new MockExecutionProvider();
-    } else {
+    if (config.JUDGE0_API_URL) {
       this.executionProvider = new Judge0Provider({
         apiUrl: config.JUDGE0_API_URL,
         apiKey: config.JUDGE0_API_KEY,
         apiHost: config.JUDGE0_API_HOST,
       });
+    } else if (config.USE_MOCK_EXECUTION) {
+      this.executionProvider = new MockExecutionProvider();
+    } else {
+      // In production without a provider, executionProvider remains null (fail closed)
+      this.executionProvider = null;
     }
 
     // Register Trace Providers
@@ -47,7 +55,7 @@ export class ExecutionService {
   /**
    * Set custom execution provider (useful for testing)
    */
-  public setExecutionProvider(provider: ExecutionProvider): void {
+  public setExecutionProvider(provider: ExecutionProvider | null): void {
     this.executionProvider = provider;
   }
 
@@ -59,26 +67,72 @@ export class ExecutionService {
   }
 
   /**
-   * Returns list of all languages supported by AlgoLens with their Run & Trace capabilities
+   * Check if Run mode is available in the current environment
    */
-  public getCapabilities(): LanguageCapability[] {
-    return getLanguageCapabilities();
+  public isRunAvailable(): boolean {
+    return this.executionProvider !== null;
   }
 
   /**
-   * Execute code using the configured provider
+   * Returns list of all languages supported by AlgoLens with their Run & Trace capabilities
+   */
+  public getCapabilities(): LanguageCapability[] {
+    const baseCaps = getLanguageCapabilities();
+    const runAvailable = this.isRunAvailable();
+    const isTraceAllowed =
+      Boolean(config.JAVA_TRACE_WORKER_URL) ||
+      config.ENABLE_JAVA_TRACING ||
+      !config.isProduction;
+
+    return baseCaps.map((cap) => {
+      const capCopy = { ...cap };
+      if (!runAvailable) {
+        capCopy.supportsRun = false;
+        capCopy.limitations = [
+          ...capCopy.limitations,
+          "Run mode is currently unavailable: no execution provider (e.g. Judge0) is configured.",
+        ];
+      }
+
+      if (capCopy.language === "java") {
+        capCopy.supportsTrace = isTraceAllowed;
+        if (!isTraceAllowed) {
+          capCopy.limitations = [
+            ...capCopy.limitations,
+            "Java tracing is disabled in production pending deployment of an isolated container execution boundary.",
+          ];
+        }
+      }
+
+      return capCopy;
+    });
+  }
+
+  /**
+   * Execute code using the configured provider.
+   * Fails closed with descriptive error if no provider is configured.
    */
   public async runCode(req: RunRequest): Promise<ExecutionResult> {
+    if (!this.executionProvider) {
+      throw new Error(
+        "Code execution is currently unavailable. An execution provider (e.g. Judge0) is not configured in this environment."
+      );
+    }
+
     if (!req.sourceCode || req.sourceCode.trim().length === 0) {
       throw new Error("Source code cannot be empty.");
     }
 
     if (req.sourceCode.length > this.maxSourceLength) {
-      throw new Error(`Source code exceeds maximum permitted length of ${this.maxSourceLength} bytes.`);
+      throw new Error(
+        `Source code exceeds maximum permitted length of ${this.maxSourceLength} bytes.`
+      );
     }
 
     if (req.stdin && req.stdin.length > this.maxStdinLength) {
-      throw new Error(`Standard input exceeds maximum permitted length of ${this.maxStdinLength} bytes.`);
+      throw new Error(
+        `Standard input exceeds maximum permitted length of ${this.maxStdinLength} bytes.`
+      );
     }
 
     const langConfig = resolveLanguage(req.language);
@@ -91,8 +145,8 @@ export class ExecutionService {
     // Bound cpu and memory limits to server-configured ceilings
     const boundedReq: RunRequest = {
       ...req,
-      cpuTimeLimit: Math.min(timeLimit, 10),
-      memoryLimitKb: Math.min(req.memoryLimitKb || 128000, 256000),
+      cpuTimeLimit: Math.min(timeLimit, 5), // Max 5 seconds
+      memoryLimitKb: Math.min(req.memoryLimitKb || 64000, 128000), // Max 128MB
     };
 
     const token = await this.executionProvider.submit(boundedReq);
@@ -134,6 +188,21 @@ export class ExecutionService {
       };
     }
 
+    // Production check
+    if (config.isProduction && !config.JAVA_TRACE_WORKER_URL && !config.ENABLE_JAVA_TRACING) {
+      return {
+        success: false,
+        language: req.language,
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: "Java tracing is disabled in production without an isolated worker boundary (JAVA_TRACE_WORKER_URL).",
+        stdout: "",
+        stderr: "",
+        limitations: ["Disabled in production pending isolated container worker deployment."],
+      };
+    }
+
     const langConfig = resolveLanguage(req.language);
     if (!langConfig || !langConfig.supportsTrace) {
       return {
@@ -164,16 +233,36 @@ export class ExecutionService {
       };
     }
 
-    // Bound max steps
-    const stepLimit = req.maxSteps || req.maxEvents || 500;
-    const boundedMaxSteps = Math.min(stepLimit, 1000);
-    const boundedTimeoutMs = Math.min(req.timeoutMs || 10000, 15000);
+    // Concurrency limit enforcement
+    if (this.activeTraces >= this.maxConcurrentTraces) {
+      return {
+        success: false,
+        language: req.language,
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: `Server is currently processing maximum concurrent trace requests (${this.maxConcurrentTraces}). Please retry in a few moments.`,
+        stdout: "",
+        stderr: "",
+        limitations: DEFAULT_LIMITATIONS,
+      };
+    }
 
-    return await provider.trace({
-      ...req,
-      maxSteps: boundedMaxSteps,
-      timeoutMs: boundedTimeoutMs,
-    });
+    this.activeTraces++;
+    try {
+      // Hard server ceilings
+      const stepLimit = req.maxSteps || req.maxEvents || 500;
+      const boundedMaxSteps = Math.min(stepLimit, 500);
+      const boundedTimeoutMs = Math.min(req.timeoutMs || 6000, 10000);
+
+      return await provider.trace({
+        ...req,
+        maxSteps: boundedMaxSteps,
+        timeoutMs: boundedTimeoutMs,
+      });
+    } finally {
+      this.activeTraces = Math.max(0, this.activeTraces - 1);
+    }
   }
 }
 

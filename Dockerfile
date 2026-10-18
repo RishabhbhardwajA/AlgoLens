@@ -10,6 +10,9 @@
 # -------------------------------------------------------------------------
 FROM node:22-alpine AS builder
 
+# Install OpenJDK for compiling JavaTracer and running verification test gate
+RUN apk add --no-cache openjdk21-jdk
+
 WORKDIR /app
 
 # Install dependencies using npm workspaces and root package-lock

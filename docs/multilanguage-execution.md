@@ -210,12 +210,50 @@ The modular `TraceProvider` interface allows subsequent trace backends to be slo
 
 ---
 
-## 8. Security & Sandbox Boundary (Phase 7)
+## 8. Hardened Security & Operational Architecture
 
-Executing untrusted code requires multiple layers of defense:
+Executing untrusted code requires multiple layers of defense and zero reliance on false sandbox assumptions:
 
-1. **Process Separation:** Neither user code nor compilation runs within the Express HTTP process.
-2. **Ephemeral File Isolation:** Each trace job uses a unique directory under `scratch/` with restricted permissions, deleted immediately upon job completion.
-3. **Execution Timeouts:** Hard timeout of 6 seconds enforced by Node.js child process process kill (`SIGKILL`).
-4. **Non-Root Execution in Containers:** In production Docker and Kubernetes deployments, workers execute with `runAsNonRoot: true`, `readOnlyRootFilesystem: true` (with mounted `/tmp`), and all Linux capabilities dropped (`drop: [ALL]`).
-5. **No Docker Socket Access:** The backend API has zero access to the host Docker daemon socket.
+```
+[Student Request] ──► [AlgoLens API (Port 5000)]
+                           │
+                           │ Network-Isolated HTTP /trace (no database, no secrets)
+                           ▼
+            [Dedicated Java Trace Worker (Port 5050)]
+                 ├─► Read-Only Root Filesystem (`read_only: true`)
+                 ├─► Ephemeral Writable Mount (`/tmp`, 64MB tmpfs)
+                 ├─► Non-Root Identity (`worker` UID 1001)
+                 ├─► Dropped Capabilities (`drop: [ALL]`)
+                 ├─► Zero Network Egress (NetworkPolicy / internal Docker network)
+                 ├─► Pre-compiled JavaTracer.class (`npm run build:tracer`)
+                 ├─► Direct Process Spawning (`shell: false`, direct argv array)
+                 ├─► Process Tree Termination (`killProcessTree` via taskkill/SIGKILL)
+                 ├─► Output Stream Cap (64KB stdout/stderr truncation)
+                 └─► Hard Memory Bound (`-Xmx64m -XX:+UseSerialGC -XX:MaxRAM=128m`)
+```
+
+### 1. Dedicated Worker Sandbox Isolation:
+- Java tracing runs in a separate execution worker container (`algolens-java-worker`).
+- **No Access to Secrets or Database:** The worker container has zero mounts to `algolens.db` or `/data` and is not passed `JWT_SECRET` or any application secrets.
+- **Zero Internet Egress:** A Kubernetes `NetworkPolicy` and Docker internal network (`internal: true`) block all outbound network traffic from the worker, preventing exfiltration or malicious outbound connections.
+- **Read-Only Root Filesystem:** Root filesystem is mounted read-only (`readOnlyRootFilesystem: true`). Only a small, size-limited tmpfs (`/tmp`) is writable for ephemeral source files.
+- **No Docker Socket Mounting:** The Docker daemon socket (`/var/run/docker.sock`) is never mounted into any container.
+- **gVisor Compatibility:** The worker pod is configured for optional `runtimeClassName: gvisor` to provide kernel-level virtualization and syscall filtering.
+
+### 2. Direct Process Invocation & Process Tree Kill:
+- All child processes (`javac`, `java`) are spawned with `shell: false`. Arguments are passed as direct array elements without shell interpolation or risk of command injection.
+- Timeouts and cancellations use cross-platform process tree termination (`killProcessTree`). On Windows, `taskkill /F /T /PID` terminates the parent and all child JVMs. On Linux, process group `SIGKILL` eliminates orphaned debugger or target JVM processes.
+- Memory is strictly capped: `javac` and `java` run with `-J-Xmx64m -J-XX:+UseSerialGC` and `-Xmx64m -XX:+UseSerialGC -XX:MaxRAM=128m`.
+- Standard output and error streams are monitored with byte-counting chunk readers capped at 64KB (`MAX_STREAM_BYTES = 65536`). Infinite printing loops are truncated immediately without risking Node.js or JVM out-of-memory.
+- Failed sandbox cleanup is logged with actionable operational error messages (`console.error`) rather than silently swallowed.
+
+### 3. Fail-Closed Execution Configuration:
+- **No Mock in Production:** Production configuration strictly prohibits `USE_MOCK_EXECUTION=true`. Server startup throws a fatal configuration error if mock execution is enabled in production.
+- **Unavailable Provider Handling:** If `JUDGE0_API_URL` is absent in production, Run mode fails closed (`runAvailable = false`). Requests to `/run` return `503 Service Unavailable` with a clear explanation that an external execution provider is not configured. Heuristic mock outputs are never silently returned in production.
+- **Production Java Trace Gating:** In production, Java tracing requires either a verified isolated worker (`JAVA_TRACE_WORKER_URL`) or explicit administrative activation (`ENABLE_JAVA_TRACING=true`). Otherwise, public requests to `/trace` return `403 Forbidden` to prevent untrusted execution in an unisolated environment.
+
+### 4. API & Rate-Limiting Defenses:
+- Dedicated rate limiters protect the API: `runLimiter` (30 requests/min per IP) and `traceLimiter` (10 requests/min per IP).
+- Payload sizes are clamped to 32KB for source code and 16KB for standard input.
+- Concurrency limiter in `ExecutionService` caps simultaneous local/worker traces to 3 concurrent jobs, rejecting excess requests with 429/retry-after to prevent node starvation.
+- Submitted source code and credentials are never written to disk or recorded in application audit logs.

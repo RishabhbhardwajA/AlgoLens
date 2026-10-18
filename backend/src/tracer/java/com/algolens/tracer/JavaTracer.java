@@ -19,9 +19,11 @@ import java.util.*;
  */
 public class JavaTracer {
     private static final int DEFAULT_MAX_STEPS = 500;
+    private static final int HARD_MAX_STEPS = 500;
     private static final int MAX_COLLECTION_ELEMENTS = 50;
     private static final int MAX_STRING_LENGTH = 256;
     private static final int MAX_STACK_DEPTH = 15;
+    private static final int MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB limit for stdout/stderr
 
     public static void main(String[] args) {
         String classPath = ".";
@@ -39,6 +41,9 @@ public class JavaTracer {
                 } catch (NumberFormatException ignored) {}
             }
         }
+
+        // Enforce hard ceiling on maxSteps
+        maxSteps = Math.min(Math.max(1, maxSteps), HARD_MAX_STEPS);
 
         JavaTracer tracer = new JavaTracer(classPath, mainClass, maxSteps);
         tracer.run();
@@ -79,7 +84,7 @@ public class JavaTracer {
 
             Connector.Argument optionsArg = arguments.get("options");
             if (optionsArg != null) {
-                optionsArg.setValue("-Xmx64m -Dfile.encoding=UTF-8");
+                optionsArg.setValue("-Xmx64m -XX:+UseSerialGC -XX:MaxRAM=128m -Dfile.encoding=UTF-8");
             }
 
             vm = connector.launch(arguments);
@@ -147,6 +152,12 @@ public class JavaTracer {
 
             try {
                 if (vm != null) vm.exit(0);
+            } catch (Exception ignored) {}
+
+            try {
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                }
             } catch (Exception ignored) {}
 
             stdoutReader.join(1000);
@@ -419,9 +430,18 @@ public class JavaTracer {
     private Thread startStreamReader(InputStream is, StringBuilder target) {
         Thread t = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    target.append(line).append("\n");
+                char[] buf = new char[1024];
+                int n;
+                while ((n = reader.read(buf)) != -1) {
+                    synchronized (target) {
+                        if (target.length() < MAX_OUTPUT_BYTES) {
+                            int toAppend = Math.min(n, MAX_OUTPUT_BYTES - target.length());
+                            target.append(buf, 0, toAppend);
+                            if (target.length() >= MAX_OUTPUT_BYTES) {
+                                target.append("\n[AlgoLens Tracer: Output truncated at 64KB limit]\n");
+                            }
+                        }
+                    }
                 }
             } catch (IOException ignored) {}
         });

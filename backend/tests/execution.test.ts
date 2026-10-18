@@ -1,9 +1,16 @@
 import app from "../src/app.js";
 import http from "node:http";
+import workerApp from "../src/tracer/java/worker/server.js";
 import { JavaTraceProvider } from "../src/services/execution/javaTraceProvider.js";
+import { validateEnvironment } from "../src/config/env.js";
+import { executionService } from "../src/services/execution/executionService.js";
+import { MockExecutionProvider } from "../src/services/execution/mockExecutionProvider.js";
 
 async function runExecutionTests() {
-  console.log("=== STARTING MULTI-LANGUAGE EXECUTION & TRACING TESTS ===");
+  console.log("=== STARTING HARDENED MULTI-LANGUAGE EXECUTION & TRACING TESTS ===");
+
+  // Explicitly inject MockExecutionProvider for automated testing
+  executionService.setExecutionProvider(new MockExecutionProvider());
 
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(5189, resolve));
@@ -31,7 +38,7 @@ async function runExecutionTests() {
     const jsCap = capData.languages.find((l: any) => l.language === "javascript");
 
     if (!javaCap || !javaCap.supportsRun || !javaCap.supportsTrace) {
-      throw new Error("Java must support both Run and Trace capabilities");
+      throw new Error("Java must support both Run and Trace capabilities in test mode");
     }
     if (!pyCap || !pyCap.supportsRun || pyCap.supportsTrace) {
       throw new Error("Python must support Run, but Trace must be false initially");
@@ -49,7 +56,7 @@ async function runExecutionTests() {
     // Test 2: Validation on Run and Trace Endpoints
     // -------------------------------------------------------------
     console.log("\n[Test 2] Testing Request Validation...");
-    
+
     // Empty payload
     const badRunRes = await fetch(`${baseUrl}/run`, {
       method: "POST",
@@ -171,7 +178,6 @@ public class Solution {
       throw new Error(`Expected stdout 'Sum=60', got '${loopTrace.stdout}'`);
     }
 
-    // Verify events contain line numbers, variables, and arrays
     const stepWithArr = loopTrace.events.find(
       (e) => e.variables && e.variables.arr && e.variables.arr.isArray
     );
@@ -231,7 +237,6 @@ public class Solution {
       throw new Error(`Expected output 'Index: 3', got '${bsTrace.stdout}'`);
     }
 
-    // Verify function call and stack frames
     const bsFrameStep = bsTrace.events.find(
       (e) => e.functionName === "binarySearch" && e.stackFrames.length >= 2
     );
@@ -239,7 +244,6 @@ public class Solution {
       throw new Error("Trace did not capture multi-level stack frame inside binarySearch");
     }
 
-    // Verify pointer variables
     const pointerStep = bsTrace.events.find(
       (e) =>
         e.functionName === "binarySearch" &&
@@ -353,10 +357,161 @@ public class Solution {
     testsPassed++;
 
     // -------------------------------------------------------------
+    // Test 9: Production Startup & Config Fail-Closed Security
+    // -------------------------------------------------------------
+    console.log("\n[Test 9] Testing Production Startup Configuration Security...");
+
+    // Rule 9A: USE_MOCK_EXECUTION=true is forbidden in production
+    let threwMockError = false;
+    try {
+      validateEnvironment({
+        NODE_ENV: "production",
+        JWT_SECRET: "a-very-strong-production-secret-with-plenty-of-entropy-123456",
+        USE_MOCK_EXECUTION: "true",
+      });
+    } catch (err: any) {
+      threwMockError = true;
+      if (!err.message.includes("USE_MOCK_EXECUTION is strictly prohibited in production")) {
+        throw new Error(`Unexpected error message: ${err.message}`);
+      }
+    }
+    if (!threwMockError) {
+      throw new Error("Expected validateEnvironment to reject USE_MOCK_EXECUTION in production mode");
+    }
+    console.log("  ✓ Production mode strictly rejects USE_MOCK_EXECUTION=true.");
+
+    // Rule 9B: Production without JUDGE0_API_URL sets USE_MOCK_EXECUTION to false
+    const prodConfig = validateEnvironment({
+      NODE_ENV: "production",
+      JWT_SECRET: "a-very-strong-production-secret-with-plenty-of-entropy-123456",
+    });
+    if (prodConfig.USE_MOCK_EXECUTION) {
+      throw new Error("USE_MOCK_EXECUTION must be false in production when no provider is set");
+    }
+    console.log("  ✓ Production mode defaults USE_MOCK_EXECUTION to false.");
+
+    // Rule 9C: When Run provider is absent, /run fails closed with 503 Service Unavailable
+    const originalProvider = (executionService as any).executionProvider;
+    try {
+      executionService.setExecutionProvider(null);
+      const absentRes = await fetch(`${baseUrl}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: "python", sourceCode: "print(1)" }),
+      });
+      if (absentRes.status !== 503) {
+        throw new Error(`Expected 503 Service Unavailable when provider is absent, got ${absentRes.status}`);
+      }
+      const absentData = await absentRes.json();
+      if (!absentData.message.includes("not configured")) {
+        throw new Error("Expected clear message that execution provider is not configured");
+      }
+      console.log("  ✓ Calling /run without configured provider fails closed with 503.");
+    } finally {
+      executionService.setExecutionProvider(originalProvider);
+    }
+    testsPassed++;
+
+    // -------------------------------------------------------------
+    // Test 10: Infinite Loop Timeout & Process Tree Termination
+    // -------------------------------------------------------------
+    console.log("\n[Test 10] Testing Infinite Loop Timeout & Process Tree Kill...");
+    const infiniteLoopCode = `
+public class Solution {
+    public static void main(String[] args) {
+        while (true) {
+            // Infinite loop test
+        }
+    }
+}
+`;
+    const timeoutTrace = await javaTracer.trace({
+      language: "java",
+      sourceCode: infiniteLoopCode,
+      timeoutMs: 1500, // Short timeout for test
+    });
+
+    if (timeoutTrace.success) {
+      throw new Error("Infinite loop should not succeed");
+    }
+    if (!timeoutTrace.error || !timeoutTrace.error.includes("timed out")) {
+      throw new Error(`Expected timeout error, got: ${timeoutTrace.error}`);
+    }
+    console.log("✓ Infinite loop terminated within deadline with process tree kill.");
+    testsPassed++;
+
+    // -------------------------------------------------------------
+    // Test 11: Output Flood Truncation (64KB cap)
+    // -------------------------------------------------------------
+    console.log("\n[Test 11] Testing Output Flood 64KB Hard Cap...");
+    const floodCode = `
+public class Solution {
+    public static void main(String[] args) {
+        for (int i = 0; i < 5000; i++) {
+            System.out.println("AlgoLens flood test line: " + i);
+        }
+    }
+}
+`;
+    const floodTrace = await javaTracer.trace({
+      language: "java",
+      sourceCode: floodCode,
+      maxSteps: 20,
+    });
+
+    // Check stdout size is capped
+    const stdoutLength = floodTrace.stdout.length;
+    if (stdoutLength > 70000) {
+      throw new Error(`Stdout was not capped at 64KB (was ${stdoutLength} bytes)`);
+    }
+    console.log(`✓ Output flood successfully capped: ${stdoutLength} bytes (within 64KB limit).`);
+    testsPassed++;
+
+    // -------------------------------------------------------------
+    // Test 12: Dedicated Worker Service HTTP Communication
+    // -------------------------------------------------------------
+    console.log("\n[Test 12] Testing Dedicated Worker Service HTTP Dispatch...");
+    const workerServer = http.createServer(workerApp);
+    await new Promise<void>((resolve) => workerServer.listen(5190, resolve));
+
+    try {
+      const workerHealth = await fetch("http://localhost:5190/health");
+      if (workerHealth.status !== 200) {
+        throw new Error(`Worker health check failed with status ${workerHealth.status}`);
+      }
+      const workerHealthData = await workerHealth.json();
+      if (!workerHealthData.service.includes("Java Trace Worker")) {
+        throw new Error("Invalid worker health response");
+      }
+
+      // Test dispatching a trace to the worker
+      const workerTraceRes = await fetch("http://localhost:5190/trace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceCode: `public class Solution { public static void main(String[] args) { System.out.println("Hello Worker"); } }`,
+          maxSteps: 10,
+        }),
+      });
+
+      if (workerTraceRes.status !== 200) {
+        throw new Error(`Worker trace failed with status ${workerTraceRes.status}`);
+      }
+      const workerTrace = await workerTraceRes.json();
+      if (!workerTrace.success || !workerTrace.stdout.includes("Hello Worker")) {
+        throw new Error(`Worker did not return expected output: ${JSON.stringify(workerTrace)}`);
+      }
+      console.log("✓ Dedicated worker microservice responded to health check and executed trace over HTTP.");
+      testsPassed++;
+    } finally {
+      workerServer.close();
+    }
+
+    // -------------------------------------------------------------
     // Summary
     // -------------------------------------------------------------
     console.log(`\n========================================================`);
-    console.log(`ALL ${testsPassed} MULTI-LANGUAGE EXECUTION TESTS PASSED!`);
+    console.log(`ALL ${testsPassed} MULTI-LANGUAGE HARDENED TESTS PASSED!`);
     console.log(`========================================================\n`);
   } finally {
     server.close();

@@ -9,6 +9,9 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
+  - worker-deployment.yaml
+  - worker-service.yaml
+  - networkpolicy.yaml
 
 images:
   - name: algolens

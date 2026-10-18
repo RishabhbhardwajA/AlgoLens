@@ -24,11 +24,13 @@ export interface AppConfig {
   JUDGE0_API_KEY?: string;
   JUDGE0_API_HOST?: string;
   USE_MOCK_EXECUTION: boolean;
+  ENABLE_JAVA_TRACING: boolean;
+  JAVA_TRACE_WORKER_URL?: string;
 }
 
 /**
  * Validates configuration and enforces that production mode rejects missing,
- * weak (< 32 chars), or example placeholder JWT secrets.
+ * weak (< 32 chars), or example placeholder JWT secrets, and prohibits mock execution.
  */
 export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV || "development";
@@ -60,6 +62,13 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
           `(currently ${rawSecret.length} characters).`
       );
     }
+
+    if (env.USE_MOCK_EXECUTION === "true") {
+      throw new Error(
+        "FATAL SECURITY CONFIG ERROR: USE_MOCK_EXECUTION is strictly prohibited in production mode. " +
+          "Production must never return simulated mock results as though real code executed."
+      );
+    }
   }
 
   // Development/Test fallback
@@ -76,10 +85,12 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
   const judge0Url = env.JUDGE0_API_URL?.trim();
   const judge0Key = env.JUDGE0_API_KEY?.trim();
   const judge0Host = env.JUDGE0_API_HOST?.trim();
-  const useMockExecution =
-    env.USE_MOCK_EXECUTION === "true" ||
-    env.NODE_ENV === "test" ||
-    !judge0Url;
+
+  // Mock execution may only be enabled in dev/test if explicitly requested
+  const useMockExecution = !isProduction && (env.USE_MOCK_EXECUTION === "true" || nodeEnv === "test");
+
+  const enableJavaTracing = env.ENABLE_JAVA_TRACING === "true";
+  const javaTraceWorkerUrl = env.JAVA_TRACE_WORKER_URL?.trim();
 
   return {
     PORT: isNaN(port) ? 5000 : port,
@@ -92,6 +103,8 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     JUDGE0_API_KEY: judge0Key,
     JUDGE0_API_HOST: judge0Host,
     USE_MOCK_EXECUTION: useMockExecution,
+    ENABLE_JAVA_TRACING: enableJavaTracing,
+    JAVA_TRACE_WORKER_URL: javaTraceWorkerUrl,
   };
 }
 

@@ -1,9 +1,11 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { randomUUID } from "crypto";
 import { fileURLToPath } from "url";
+import { config } from "../../config/env.js";
+import { killProcessTree } from "../../utils/processTree.js";
 import type {
   LanguageCapability,
   TraceProvider,
@@ -19,7 +21,10 @@ const DEFAULT_LIMITATIONS = [
   "Arrays serialized up to 50 elements",
   "Strings truncated at 256 characters",
   "Stack frame depth limited to 15 frames",
+  "Standard output & error capped at 64KB",
 ];
+
+const MAX_STREAM_BYTES = 64 * 1024; // 64 KB hard cap for process output streams
 
 export class JavaTraceProvider implements TraceProvider {
   public readonly language = "java";
@@ -34,22 +39,29 @@ export class JavaTraceProvider implements TraceProvider {
     defaultTimeoutMs?: number;
     defaultMaxSteps?: number;
   }) {
-    // Path to the compiled JavaTracer class
+    // Path to the pre-compiled JavaTracer class files
     this.tracerClasspath =
       options?.tracerClasspath || path.resolve(__dirname, "../../../dist/tracer/java");
-    this.maxCodeLength = options?.maxCodeLength || 64 * 1024; // 64KB
-    this.defaultTimeoutMs = options?.defaultTimeoutMs || 10000; // 10s
-    this.defaultMaxSteps = options?.defaultMaxSteps || 500;
+    this.maxCodeLength = options?.maxCodeLength || 32 * 1024; // 32KB hard limit for source code
+    this.defaultTimeoutMs = options?.defaultTimeoutMs || 6000;  // 6s default timeout
+    this.defaultMaxSteps = options?.defaultMaxSteps || 500;     // 500 steps hard ceiling
   }
 
   public getCapability(): LanguageCapability {
+    const isTraceAllowed =
+      Boolean(config.JAVA_TRACE_WORKER_URL) ||
+      config.ENABLE_JAVA_TRACING ||
+      !config.isProduction;
+
     return {
       language: "java",
       displayName: "Java",
       version: "OpenJDK 17 / 24",
       supportsRun: true,
-      supportsTrace: true,
-      limitations: DEFAULT_LIMITATIONS,
+      supportsTrace: isTraceAllowed,
+      limitations: isTraceAllowed
+        ? DEFAULT_LIMITATIONS
+        : ["Java tracing is disabled in production pending deployment of an isolated container execution boundary."],
     };
   }
 
@@ -65,6 +77,23 @@ export class JavaTraceProvider implements TraceProvider {
         stdout: "",
         stderr: "",
         limitations: DEFAULT_LIMITATIONS,
+      };
+    }
+
+    // Production security gate: fail closed if no isolated worker and tracing not explicitly enabled
+    if (config.isProduction && !config.JAVA_TRACE_WORKER_URL && !config.ENABLE_JAVA_TRACING) {
+      return {
+        success: false,
+        language: "java",
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: "Java trace execution is disabled in production without a verified isolated worker boundary (JAVA_TRACE_WORKER_URL).",
+        stdout: "",
+        stderr: "",
+        limitations: [
+          "Disabled in production to protect host application from unisolated execution risks.",
+        ],
       };
     }
 
@@ -96,7 +125,76 @@ export class JavaTraceProvider implements TraceProvider {
       };
     }
 
-    // Determine the class name. Default to "Solution" if not found.
+    // 1. If remote worker URL is configured, dispatch trace over HTTP to dedicated worker container
+    if (config.JAVA_TRACE_WORKER_URL) {
+      return await this.dispatchToWorker(request);
+    }
+
+    // 2. Direct local execution (for development, test, or hardened worker process)
+    return await this.executeLocal(request);
+  }
+
+  /**
+   * Dispatch trace request to dedicated isolated container worker service
+   */
+  private async dispatchToWorker(request: TraceRequest): Promise<TraceResult> {
+    const workerEndpoint = `${config.JAVA_TRACE_WORKER_URL?.replace(/\/+$/, "")}/trace`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), (request.timeoutMs || this.defaultTimeoutMs) + 2000);
+
+    try {
+      const res = await fetch(workerEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: "java",
+          sourceCode: request.sourceCode,
+          maxSteps: Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500),
+          timeoutMs: Math.min(request.timeoutMs || this.defaultTimeoutMs, 10000),
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        return {
+          success: false,
+          language: "java",
+          events: [],
+          truncated: false,
+          totalEvents: 0,
+          error: errJson.message || `Java trace worker returned HTTP ${res.status}`,
+          stdout: "",
+          stderr: "",
+          limitations: DEFAULT_LIMITATIONS,
+        };
+      }
+
+      return (await res.json()) as TraceResult;
+    } catch (err: any) {
+      const isTimeout = err.name === "AbortError";
+      return {
+        success: false,
+        language: "java",
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: isTimeout
+          ? `Java trace worker request timed out.`
+          : `Failed to communicate with Java trace worker: ${err.message}`,
+        stdout: "",
+        stderr: "",
+        limitations: DEFAULT_LIMITATIONS,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Local execution using direct process invocation, process tree killing, and strict resource bounds
+   */
+  private async executeLocal(request: TraceRequest): Promise<TraceResult> {
     const className = this.extractClassName(request.sourceCode) || "Solution";
     const runId = randomUUID();
     const sandboxDir = path.join(os.tmpdir(), `algolens-java-${runId}`);
@@ -106,12 +204,12 @@ export class JavaTraceProvider implements TraceProvider {
       await fs.promises.mkdir(sandboxDir, { recursive: true });
       await fs.promises.writeFile(sourceFilePath, request.sourceCode, "utf8");
 
-      // 1. Compile with debug info (-g)
-      const compileResult = await this.compileJava(
-        sandboxDir,
-        className,
-        request.timeoutMs || this.defaultTimeoutMs
-      );
+      // Verify that JavaTracer.class is pre-compiled and available
+      this.verifyTracerArtifacts();
+
+      // 1. Compile with debug info (-g) using direct process invocation (shell: false)
+      const timeoutMs = Math.min(request.timeoutMs || this.defaultTimeoutMs, 10000);
+      const compileResult = await this.compileJava(sandboxDir, className, timeoutMs);
       if (!compileResult.success) {
         return {
           success: false,
@@ -127,12 +225,8 @@ export class JavaTraceProvider implements TraceProvider {
         };
       }
 
-      // 2. Ensure JavaTracer is compiled and available
-      await this.ensureTracerCompiled();
-
-      // 3. Launch JavaTracer with JDI
-      const maxSteps = request.maxSteps || request.maxEvents || this.defaultMaxSteps;
-      const timeoutMs = request.timeoutMs || this.defaultTimeoutMs;
+      // 2. Launch JavaTracer with JDI using direct process invocation and process tree killing
+      const maxSteps = Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500);
       const traceOutput = await this.runTracer(sandboxDir, className, maxSteps, timeoutMs);
 
       return traceOutput;
@@ -149,11 +243,13 @@ export class JavaTraceProvider implements TraceProvider {
         limitations: DEFAULT_LIMITATIONS,
       };
     } finally {
-      // Ephemeral cleanup
+      // Ephemeral cleanup with actionable operational error logging
       try {
         await fs.promises.rm(sandboxDir, { recursive: true, force: true });
-      } catch (cleanupErr) {
-        // Silently ignore cleanup error in tmpdir
+      } catch (cleanupErr: any) {
+        console.error(
+          `[AlgoLens Operational Error] Failed to delete ephemeral sandbox directory '${sandboxDir}': ${cleanupErr?.message}`
+        );
       }
     }
   }
@@ -170,6 +266,22 @@ export class JavaTraceProvider implements TraceProvider {
     return null;
   }
 
+  private verifyTracerArtifacts(): void {
+    const classFile = path.join(
+      this.tracerClasspath,
+      "com",
+      "algolens",
+      "tracer",
+      "JavaTracer.class"
+    );
+    if (!fs.existsSync(classFile)) {
+      throw new Error(
+        `Required JavaTracer class artifact not found at '${classFile}'. ` +
+          `Production deployments must pre-compile JavaTracer during image build using 'npm run build:tracer'.`
+      );
+    }
+  }
+
   private async compileJava(
     dir: string,
     className: string,
@@ -177,32 +289,43 @@ export class JavaTraceProvider implements TraceProvider {
   ): Promise<{ success: boolean; output: string }> {
     return new Promise((resolve) => {
       const javaFile = `${className}.java`;
-      const javac = spawn("javac", ["-g", "-encoding", "UTF-8", javaFile], {
-        cwd: dir,
-        shell: true,
-      });
+
+      // Direct process invocation: shell: false, strict argument array, serial GC & memory bound
+      const javac: ChildProcess = spawn(
+        "javac",
+        ["-g", "-encoding", "UTF-8", "-J-Xmx64m", "-J-XX:+UseSerialGC", javaFile],
+        {
+          cwd: dir,
+          shell: false,
+          windowsHide: true,
+        }
+      );
 
       let stdout = "";
       let stderr = "";
       let finished = false;
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         if (!finished) {
           finished = true;
-          javac.kill();
+          await killProcessTree(javac);
           resolve({
             success: false,
-            output: "Compilation timed out after " + timeoutMs + "ms",
+            output: `Compilation timed out after ${timeoutMs}ms. Process terminated.`,
           });
         }
       }, timeoutMs);
 
-      javac.stdout.on("data", (data) => {
-        stdout += data.toString();
+      javac.stdout?.on("data", (data: Buffer) => {
+        if (stdout.length < MAX_STREAM_BYTES) {
+          stdout += data.toString("utf8");
+        }
       });
 
-      javac.stderr.on("data", (data) => {
-        stderr += data.toString();
+      javac.stderr?.on("data", (data: Buffer) => {
+        if (stderr.length < MAX_STREAM_BYTES) {
+          stderr += data.toString("utf8");
+        }
       });
 
       javac.on("close", (code) => {
@@ -230,52 +353,6 @@ export class JavaTraceProvider implements TraceProvider {
     });
   }
 
-  private async ensureTracerCompiled(): Promise<void> {
-    const classFile = path.join(
-      this.tracerClasspath,
-      "com",
-      "algolens",
-      "tracer",
-      "JavaTracer.class"
-    );
-    if (fs.existsSync(classFile)) {
-      return;
-    }
-
-    const sourceFile = path.resolve(
-      __dirname,
-      "../../tracer/java/com/algolens/tracer/JavaTracer.java"
-    );
-    if (!fs.existsSync(sourceFile)) {
-      throw new Error(`JavaTracer source not found at: ${sourceFile}`);
-    }
-
-    await fs.promises.mkdir(this.tracerClasspath, { recursive: true });
-
-    await new Promise<void>((resolve, reject) => {
-      const javac = spawn(
-        "javac",
-        ["--add-modules", "jdk.jdi", "-d", `"${this.tracerClasspath}"`, `"${sourceFile}"`],
-        { shell: true }
-      );
-
-      let errOutput = "";
-      javac.stderr.on("data", (d) => {
-        errOutput += d.toString();
-      });
-
-      javac.on("close", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`Failed to compile JavaTracer: ${errOutput}`));
-        }
-      });
-
-      javac.on("error", reject);
-    });
-  }
-
   private async runTracer(
     sandboxDir: string,
     className: string,
@@ -283,16 +360,20 @@ export class JavaTraceProvider implements TraceProvider {
     timeoutMs: number
   ): Promise<TraceResult> {
     return new Promise((resolve) => {
-      const java = spawn(
+      // Direct process invocation: shell: false, clean arguments without shell escaping
+      const java: ChildProcess = spawn(
         "java",
         [
           "--add-modules",
           "jdk.jdi",
+          "-Xmx64m",
+          "-XX:+UseSerialGC",
+          "-XX:MaxRAM=128m",
           "-cp",
-          `"${this.tracerClasspath}"`,
+          this.tracerClasspath,
           "com.algolens.tracer.JavaTracer",
           "-cp",
-          `"${sandboxDir}"`,
+          sandboxDir,
           "-main",
           className,
           "-maxSteps",
@@ -300,7 +381,9 @@ export class JavaTraceProvider implements TraceProvider {
         ],
         {
           cwd: sandboxDir,
-          shell: true,
+          shell: false,
+          detached: process.platform !== "win32",
+          windowsHide: true,
         }
       );
 
@@ -308,17 +391,17 @@ export class JavaTraceProvider implements TraceProvider {
       let stderr = "";
       let finished = false;
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         if (!finished) {
           finished = true;
-          java.kill();
+          await killProcessTree(java);
           resolve({
             success: false,
             language: "java",
             events: [],
             truncated: false,
             totalEvents: 0,
-            error: `Execution timed out after ${timeoutMs}ms.`,
+            error: `Execution timed out after ${timeoutMs}ms. Process tree terminated.`,
             stdout,
             stderr,
             limitations: DEFAULT_LIMITATIONS,
@@ -326,12 +409,20 @@ export class JavaTraceProvider implements TraceProvider {
         }
       }, timeoutMs);
 
-      java.stdout.on("data", (data) => {
-        stdout += data.toString();
+      java.stdout?.on("data", (data: Buffer) => {
+        if (stdout.length < MAX_STREAM_BYTES) {
+          stdout += data.toString("utf8");
+        } else if (!stdout.endsWith("[Output stream truncated]\n")) {
+          stdout += "\n[Output stream truncated]\n";
+        }
       });
 
-      java.stderr.on("data", (data) => {
-        stderr += data.toString();
+      java.stderr?.on("data", (data: Buffer) => {
+        if (stderr.length < MAX_STREAM_BYTES) {
+          stderr += data.toString("utf8");
+        } else if (!stderr.endsWith("[Error stream truncated]\n")) {
+          stderr += "\n[Error stream truncated]\n";
+        }
       });
 
       java.on("close", (code) => {

@@ -1,12 +1,12 @@
 import { Router } from "express";
 import { executionController } from "../controllers/executionController.js";
-import { executionLimiter } from "../middleware/rateLimiter.js";
+import { runLimiter, traceLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
 router.get("/capabilities", executionController.getCapabilities);
 router.get("/languages", executionController.getCapabilities); // Alias
-router.post("/run", executionLimiter, executionController.run);
-router.post("/trace", executionLimiter, executionController.trace);
+router.post("/run", runLimiter, executionController.run);
+router.post("/trace", traceLimiter, executionController.trace);
 
 export default router;

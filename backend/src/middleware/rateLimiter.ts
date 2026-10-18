@@ -22,13 +22,27 @@ export const apiLimiter = rateLimit({
   },
 });
 
-export const executionLimiter = rateLimit({
+export const runLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 20,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
     error: "Too Many Requests",
-    message: "Execution rate limit reached. Please wait a moment before running or tracing more code.",
+    message: "Run execution rate limit reached (30/min). Please wait a moment before running more code.",
   },
 });
+
+export const traceLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too Many Requests",
+    message: "Trace debugger rate limit reached (10/min). Debugger tracing is resource-intensive. Please wait a moment.",
+  },
+});
+
+// Backward compatibility export
+export const executionLimiter = runLimiter;

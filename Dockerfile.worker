@@ -1,0 +1,67 @@
+# =========================================================================
+# AlgoLens — Dedicated Isolated Java Trace Worker
+# =========================================================================
+# Runs exclusively as a locked-down execution sandbox for Java JDI debugging.
+# Hardening:
+#  - OpenJDK 21 + Node.js runtime
+#  - Non-root user (UID 1001)
+#  - Zero database access, zero application secrets
+#  - Read-only root filesystem with writable /tmp mount
+# =========================================================================
+
+FROM node:22-alpine AS worker-builder
+
+RUN apk add --no-cache openjdk21-jdk
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/
+
+RUN npm ci
+
+COPY backend/ backend/
+COPY tsconfig.json ./
+
+# Pre-compile JavaTracer class bytecode during image build
+RUN mkdir -p backend/dist/tracer/java && \
+    javac --add-modules jdk.jdi -d backend/dist/tracer/java backend/src/tracer/java/com/algolens/tracer/JavaTracer.java && \
+    npm --prefix backend run build
+
+# -------------------------------------------------------------------------
+# Runtime Worker Stage
+# -------------------------------------------------------------------------
+FROM node:22-alpine AS worker-runner
+
+# Install OpenJDK runtime and compiler for target Java code execution
+RUN apk add --no-cache openjdk21-jdk dumb-init && \
+    rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/bin/corepack \
+           /opt/yarn*
+
+ENV NODE_ENV=production \
+    PORT=5050
+
+WORKDIR /app
+
+# Create dedicated non-root worker user (UID 1001)
+RUN addgroup -g 1001 worker && \
+    adduser -u 1001 -G worker -s /bin/sh -D worker && \
+    mkdir -p /app/backend/dist /tmp/algolens && \
+    chown -R worker:worker /app /tmp/algolens
+
+# Copy runtime node dependencies and pre-compiled bytecode from worker-builder
+COPY --from=worker-builder --chown=worker:worker /app/node_modules ./node_modules
+COPY --from=worker-builder --chown=worker:worker /app/backend/dist ./backend/dist
+COPY --from=worker-builder --chown=worker:worker /app/backend/package.json ./backend/package.json
+
+USER worker
+
+EXPOSE 5050
+
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+  CMD wget -qO- http://localhost:5050/health || exit 1
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "backend/dist/tracer/java/worker/server.js"]

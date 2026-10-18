@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: algolens-java-worker
+  namespace: algolens
+  labels:
+    app.kubernetes.io/name: algolens-java-worker
+    app.kubernetes.io/component: execution-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: algolens-java-worker
+      app.kubernetes.io/component: execution-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: algolens-java-worker
+        app.kubernetes.io/component: execution-worker
+    spec:
+      # Optional: Uncomment on clusters supporting gVisor (e.g. GKE Sandbox) for kernel-level sandboxing
+      # runtimeClassName: gvisor
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 15
+
+      containers:
+        - name: java-worker
+          image: algolens-java-worker:local
+          imagePullPolicy: IfNotPresent
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          ports:
+            - name: http
+              containerPort: 5050
+              protocol: TCP
+
+          # Hard resource quotas preventing runaway processes
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "5050"
+            - name: RUN_STANDALONE_WORKER
+              value: "true"
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+
+          volumeMounts:
+            # Ephemeral writable temporary directory required for readOnlyRootFilesystem
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp-volume
+          emptyDir:
+            sizeLimit: 128Mi

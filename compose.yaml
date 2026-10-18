@@ -1,16 +1,10 @@
 # =========================================================================
-# AlgoLens — Local & Production Docker Compose Configuration
+# AlgoLens — Production Hardened Multi-Container Architecture
 # =========================================================================
-# Runs the unified AlgoLens service (Express API + Vite SPA) with persistent
-# SQLite storage, container healthchecks, and non-root execution.
-#
-# Quickstart:
-#   1. Copy .env.example to .env and configure a secure JWT_SECRET:
-#      openssl rand -base64 48
-#   2. Start container:
-#      docker compose up -d
-#   3. View logs:
-#      docker compose logs -f
+# Separates the main Express/Vite application from user-code execution:
+#   1. algolens: Web UI & authenticated API with SQLite storage.
+#   2. java-trace-worker: Isolated sandbox worker running JDI debugger with
+#      zero database access, zero application secrets, read-only root, and cgroups.
 # =========================================================================
 
 services:
@@ -26,13 +20,22 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
-      # Load JWT_SECRET from local .env file or environment; do not commit secrets
       - JWT_SECRET=${JWT_SECRET}
       - DATABASE_PATH=/app/backend/data/algolens.db
       - CLIENT_URL=${CLIENT_URL:-http://localhost:5000}
+      - JUDGE0_API_URL=${JUDGE0_API_URL:-}
+      - JUDGE0_API_KEY=${JUDGE0_API_KEY:-}
+      - JAVA_TRACE_WORKER_URL=http://java-trace-worker:5050
+      - ENABLE_JAVA_TRACING=true
     volumes:
-      # Persistent named volume preserves SQLite user records, progress, and snippets across restarts
       - algolens-data:/app/backend/data
+    tmpfs:
+      - /tmp:rw,size=32m,mode=1777
+    depends_on:
+      - java-trace-worker
+    networks:
+      - default
+      - exec-net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:5000/api/health"]
       interval: 15s
@@ -40,7 +43,36 @@ services:
       retries: 3
       start_period: 5s
 
+  java-trace-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: algolens-java-worker:local
+    container_name: algolens-java-worker
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+    # Isolated internal network only - no host port binding, no secrets, no database volume
+    networks:
+      - exec-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5050/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
+
 volumes:
-  # Isolated persistent volume for SQLite database storage
   algolens-data:
     name: algolens-sqlite-data
+
+networks:
+  default:
+  exec-net:
+    internal: true
