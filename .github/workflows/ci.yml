@@ -24,10 +24,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout Source Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js LTS (v22)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: "npm"
@@ -48,35 +48,25 @@ jobs:
         run: npm run build
 
   # -----------------------------------------------------------------------
-  # Job 2: Multi-Stage Docker Build, Security Scan Gate & Conditional Publish
+  # Job 2: Multi-Stage Docker Build & Security Scan Gate
+  # Runs with read-only permissions on PRs and main; fails on CRITICAL/HIGH CVEs
   # -----------------------------------------------------------------------
-  docker:
-    name: Docker Build, Scan & Publish
+  docker-scan:
+    name: Docker Build & Security Scan Gate
     needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - name: Checkout Source Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Extract Docker Metadata (Tags & Labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=sha,prefix=sha-,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      # Step 1: Build image locally for scanning (DO NOT PUSH YET)
+      # Step 1: Build image locally for scanning (DO NOT PUSH)
       - name: Build Local Image for Security Scanning
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: Dockerfile
@@ -85,30 +75,55 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Step 2: Security Gate — Scan local image for CRITICAL vulnerabilities
-      # Image publishing will NOT proceed if the scan detects unmitigated flaws.
+      # Step 2: Security Gate — Scan local image for CRITICAL and HIGH vulnerabilities
+      # Non-zero exit code (1) blocks downstream publish job if findings are detected.
       - name: Run Trivy Vulnerability Scanner Gate
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: algolens:scan
           format: "table"
-          exit-code: "0" # Non-zero blocks release on critical CVEs
+          exit-code: "1" # Non-zero blocks release on CRITICAL or HIGH CVEs
           ignore-unfixed: true
           severity: "CRITICAL,HIGH"
 
-      # Step 3: Authenticate with GHCR only after tests, build, and scan pass
+  # -----------------------------------------------------------------------
+  # Job 3: Dedicated GHCR Publishing
+  # Isolated job with packages:write; runs ONLY on main branch after validate & scan pass
+  # -----------------------------------------------------------------------
+  publish:
+    name: Publish Container Image to GHCR
+    needs: [validate, docker-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Extract Docker Metadata (Tags & Labels)
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
       - name: Log in to GitHub Container Registry (GHCR)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 4: Push verified, pre-scanned image to registry
       - name: Push Scanned & Verified Docker Image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: Dockerfile
