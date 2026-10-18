@@ -31,6 +31,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/explore" element={<Explorer />} />
+            <Route path="/explorer" element={<Explorer />} />
+            <Route path="/visualizer" element={<VisualizerPage />} />
             <Route path="/visualizer/:id" element={<VisualizerPage />} />
             <Route path="/playground" element={<Playground />} />
             <Route path="/builder" element={<GraphBuilder />} />

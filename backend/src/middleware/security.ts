@@ -8,12 +8,12 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; " +
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; " +
       "worker-src 'self' blob:; " +
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-      "font-src 'self' https://fonts.gstatic.com; " +
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
+      "font-src 'self' https://fonts.gstatic.com data: https://cdn.jsdelivr.net; " +
       "img-src 'self' data: blob:; " +
-      "connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173; " +
+      "connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173 https://cdn.jsdelivr.net; " +
       "frame-ancestors 'none'; " +
       "base-uri 'self'; " +
       "form-action 'self';"

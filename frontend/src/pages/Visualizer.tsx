@@ -45,15 +45,16 @@ export default function VisualizerPage() {
   const bookmarked = id ? isBookmarked(id) : false;
 
   useEffect(() => {
-    if (!id) return;
-    const alg = getAlgorithm(id);
+    const searchParams = new URLSearchParams(window.location.search);
+    const targetId = id || searchParams.get("algo") || "binary-search";
+    const alg = getAlgorithm(targetId);
     if (!alg) {
       navigate("/explore");
       return;
     }
     loadAlgorithm(alg);
     if (isAuthenticated) {
-      recordProgress(id, { steps_explored: 1 });
+      recordProgress(targetId, { steps_explored: 1 });
     }
   }, [id, loadAlgorithm, navigate, isAuthenticated, recordProgress]);
 

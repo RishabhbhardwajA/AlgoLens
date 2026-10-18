@@ -116,6 +116,13 @@ export function CodeEditorPanel() {
           language={activeLang === "cpp" ? "cpp" : activeLang}
           value={sourceCodeStr}
           theme="algolens-light"
+          loading={
+            <StaticCodeFallback
+              sourceCode={sourceCodeStr}
+              activeLine={currentStep?.line}
+              isExecuting={isExecutingLang}
+            />
+          }
           options={{
             readOnly: true,
             minimap: { enabled: false },
@@ -217,6 +224,42 @@ function PanelHeader({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function StaticCodeFallback({
+  sourceCode,
+  activeLine,
+  isExecuting,
+}: {
+  sourceCode: string;
+  activeLine?: number;
+  isExecuting?: boolean;
+}) {
+  const lines = (sourceCode || "").split("\n");
+  return (
+    <div className="h-full overflow-auto font-mono text-[12px] leading-[20px] p-2 bg-[#FAFAFA] select-text">
+      {lines.map((lineText, idx) => {
+        const lineNum = idx + 1;
+        const isActive = isExecuting && activeLine === lineNum;
+        return (
+          <div
+            key={lineNum}
+            className={cn(
+              "flex items-center min-h-[20px] rounded-xs px-1 font-mono transition-colors",
+              isActive
+                ? "bg-indigo-100/90 text-indigo-900 font-bold border-l-2 border-indigo-600 pl-1"
+                : "text-slate-700 hover:bg-slate-100/60"
+            )}
+          >
+            <span className="w-8 text-right pr-3 text-slate-400 select-none text-[11px] shrink-0">
+              {lineNum}
+            </span>
+            <span className="whitespace-pre font-mono">{lineText || " "}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
