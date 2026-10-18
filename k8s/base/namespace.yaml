@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: algolens
+  labels:
+    app.kubernetes.io/name: algolens
+    app.kubernetes.io/part-of: algolens-platform

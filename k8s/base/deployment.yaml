@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: algolens-deployment
+  namespace: algolens
+  labels:
+    app.kubernetes.io/name: algolens
+    app.kubernetes.io/component: web-api
+spec:
+  # =========================================================================
+  # ARCHITECTURAL SCALING CONSTRAINT:
+  # Exactly 1 replica is used because AlgoLens operates an embedded SQLite
+  # database with WAL journal mode. SQLite uses POSIX file advisory locks and
+  # cannot coordinate concurrent write transactions across multiple distributed
+  # Pods. Scaling beyond 1 replica requires migrating to a networked database
+  # (e.g., PostgreSQL).
+  # =========================================================================
+  replicas: 1
+  strategy:
+    type: Recreate # Ensures old pod terminates before new pod attaches to the PVC
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: algolens
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: algolens
+        app.kubernetes.io/component: web-api
+    spec:
+      # Pod-level security context enforcing non-root execution and default seccomp profile
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: algolens
+          image: algolens:local
+          imagePullPolicy: IfNotPresent
+
+          # Container-level hardening: drop all Linux capabilities and prevent privilege escalation
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+
+          # Resource quotas preventing noisy-neighbor starvation on Kubernetes nodes
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          # Configuration from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: algolens-config
+
+          # Sensitive credentials injected securely from Kubernetes Secret
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: algolens-secrets
+                  key: JWT_SECRET
+
+          # Startup Probe: verifies application successfully boots before activating readiness
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 6
+
+          # Readiness Probe: controls when traffic is routed via the Service
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # Liveness Probe: restarts pod if deadlocked or unresponsive
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+
+          volumeMounts:
+            # Persistent SQLite database mount
+            - name: data-volume
+              mountPath: /data
+            # Writable temporary directory required for readOnlyRootFilesystem
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: data-volume
+          persistentVolumeClaim:
+            claimName: algolens-data-pvc
+        - name: tmp-volume
+          emptyDir: {}

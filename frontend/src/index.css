@@ -1,0 +1,203 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* ============================================================
+   Luminous Computation Design System — Tailwind v4
+   ============================================================ */
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  /* Backgrounds & Surfaces */
+  --color-surface: #FAF8FF;
+  --color-surface-bright: #FFFFFF;
+  --color-surface-low: #F2F3FF;
+  --color-surface-container: #EAEDFF;
+  --color-surface-high: #E2E7FF;
+  --color-surface-highest: #DAE2FD;
+  --color-surface-dim: #D2D9F4;
+
+  /* Text */
+  --color-on-surface: #131B2E;
+  --color-on-surface-variant: #464554;
+  --color-outline: #767586;
+  --color-outline-variant: #C7C4D7;
+
+  /* Primary — Indigo */
+  --color-primary: #4648D4;
+  --color-primary-bright: #6366F1;
+  --color-on-primary: #FFFFFF;
+  --color-primary-container: #E1E0FF;
+  --color-primary-fixed: #6063EE;
+
+  /* Secondary — Sky Blue */
+  --color-secondary: #38BDF8;
+  --color-secondary-container: #C4E7FF;
+
+  /* Tertiary — Emerald */
+  --color-tertiary: #10B981;
+  --color-tertiary-container: #D1FAE5;
+
+  /* Error */
+  --color-error: #BA1A1A;
+  --color-error-container: #FFDAD6;
+
+  /* Legacy obsidian kept for visualizer dark panels */
+  --color-obsidian-900: #07090e;
+  --color-obsidian-800: #0c0e13;
+  --color-obsidian-700: #111319;
+  --color-obsidian-600: #191c21;
+  --color-obsidian-500: #282a30;
+
+  --color-quantum-cyan: #6366F1;
+  --color-quantum-cyan-dim: #4648D4;
+  --color-cyber-amber: #F59E0B;
+  --color-electric-violet: #8B5CF6;
+  --color-bio-emerald: #10B981;
+
+  --color-brand-400: #6366F1;
+  --color-brand-500: #4648D4;
+  --color-brand-600: #3730A3;
+
+  /* Algo state colors */
+  --color-algo-current: #F59E0B;
+  --color-algo-visited: #10B981;
+  --color-algo-comparing: #F59E0B;
+  --color-algo-found: #6366F1;
+  --color-algo-eliminated: #CBD5E1;
+  --color-algo-returning: #8B5CF6;
+  --color-algo-pointer: #EC4899;
+
+  /* Animations */
+  --animate-pulse-ring: pulseRing 2.4s ease-in-out infinite;
+  --animate-scanline: scanline 4s linear infinite;
+
+  @keyframes pulseRing {
+    0% { transform: scale(0.92); opacity: 0.9; }
+    50% { transform: scale(1.18); opacity: 0.25; }
+    100% { transform: scale(0.92); opacity: 0.9; }
+  }
+
+  @keyframes scanline {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(1000%); }
+  }
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  color-scheme: light;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.2);
+  color: #0F172A;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.35); }
+
+/* ============================================================
+   Glassmorphism Panels — Light Mode
+   ============================================================ */
+
+.panel {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 6px 16px rgba(99, 102, 241, 0.04);
+}
+
+.panel-elevated {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+}
+
+.panel-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+.panel-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-primary-bright);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, var(--color-primary-bright), var(--color-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glow-cyan-ambient {
+  box-shadow: 0 0 24px -4px rgba(99, 102, 241, 0.2);
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 0 20px rgba(99, 102, 241, 0.1);
+}
+
+.quantum-grid-bg {
+  background-size: 32px 32px;
+  background-image:
+    linear-gradient(to right, rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+}
+
+/* Code line active highlight */
+.code-line-active {
+  background: rgba(99, 102, 241, 0.08) !important;
+  border-left: 2px solid var(--color-primary-bright) !important;
+}
+
+/* React Flow overrides — light mode */
+.react-flow__node {
+  font-family: var(--font-mono) !important;
+}
+
+.react-flow__controls {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  border-radius: 0.5rem !important;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06) !important;
+}
+
+.react-flow__controls-button {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6) !important;
+  fill: rgba(70, 69, 84, 0.7) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(99, 102, 241, 0.06) !important;
+  fill: #4648D4 !important;
+}

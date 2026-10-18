@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: algolens-data-pvc
+  namespace: algolens
+  labels:
+    app.kubernetes.io/name: algolens
+spec:
+  # ReadWriteOnce: volume can be mounted as read-write by a single node
+  # Required for SQLite's single-process write lock semantics
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
