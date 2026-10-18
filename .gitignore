@@ -35,3 +35,5 @@ data/*.db
 backend/data/*.db
 backend/src/database/*.db
 backend/dist/database/*.db
+scratch/
+

@@ -20,6 +20,10 @@ export interface AppConfig {
   JWT_SECRET: string;
   CLIENT_URL: string;
   DATABASE_PATH?: string;
+  JUDGE0_API_URL?: string;
+  JUDGE0_API_KEY?: string;
+  JUDGE0_API_HOST?: string;
+  USE_MOCK_EXECUTION: boolean;
 }
 
 /**
@@ -69,6 +73,14 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     );
   }
 
+  const judge0Url = env.JUDGE0_API_URL?.trim();
+  const judge0Key = env.JUDGE0_API_KEY?.trim();
+  const judge0Host = env.JUDGE0_API_HOST?.trim();
+  const useMockExecution =
+    env.USE_MOCK_EXECUTION === "true" ||
+    env.NODE_ENV === "test" ||
+    !judge0Url;
+
   return {
     PORT: isNaN(port) ? 5000 : port,
     NODE_ENV: nodeEnv,
@@ -76,6 +88,10 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     JWT_SECRET: jwtSecret,
     CLIENT_URL: clientUrl,
     DATABASE_PATH: databasePath,
+    JUDGE0_API_URL: judge0Url,
+    JUDGE0_API_KEY: judge0Key,
+    JUDGE0_API_HOST: judge0Host,
+    USE_MOCK_EXECUTION: useMockExecution,
   };
 }
 
