@@ -132,8 +132,20 @@ export const executionController = {
         timeoutMs: boundedTimeout,
       });
 
-      if (!traceResult.success && traceResult.error?.includes("disabled in production")) {
-        return res.status(403).json(traceResult);
+      if (!traceResult.success) {
+        if (
+          traceResult.error?.includes("JAVA_TRACE_WORKER_URL is not configured") ||
+          traceResult.error?.includes("unavailable")
+        ) {
+          return res.status(503).json(traceResult);
+        }
+        if (
+          traceResult.error?.includes("disabled") ||
+          traceResult.error?.includes("Unauthorized") ||
+          traceResult.error?.includes("refuses to execute")
+        ) {
+          return res.status(403).json(traceResult);
+        }
       }
 
       return res.json(traceResult);

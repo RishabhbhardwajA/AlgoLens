@@ -10,7 +10,11 @@ import type {
 } from "../../types/execution.js";
 import { Judge0Provider } from "./judge0Provider.js";
 import { MockExecutionProvider } from "./mockExecutionProvider.js";
-import { JavaTraceProvider } from "./javaTraceProvider.js";
+import {
+  JavaTraceProvider,
+  LocalJavaTraceExecutor,
+  RemoteJavaTraceDispatcher,
+} from "./javaTraceProvider.js";
 import {
   getLanguageCapabilities,
   resolveLanguage,
@@ -48,8 +52,16 @@ export class ExecutionService {
       this.executionProvider = null;
     }
 
-    // Register Trace Providers
-    this.traceProviders.set("java", new JavaTraceProvider());
+    // Register Trace Providers based on explicit execution role
+    if (config.EXECUTION_ROLE === "worker" || (!config.isProduction && process.env.NODE_ENV === "test")) {
+      this.traceProviders.set("java", new LocalJavaTraceExecutor({ authorizedForLocal: true }));
+    } else {
+      // Main API service uses RemoteJavaTraceDispatcher; never executes local compiler or debugger
+      this.traceProviders.set(
+        "java",
+        new RemoteJavaTraceDispatcher({ workerUrl: config.JAVA_TRACE_WORKER_URL })
+      );
+    }
   }
 
   /**
@@ -79,10 +91,8 @@ export class ExecutionService {
   public getCapabilities(): LanguageCapability[] {
     const baseCaps = getLanguageCapabilities();
     const runAvailable = this.isRunAvailable();
-    const isTraceAllowed =
-      Boolean(config.JAVA_TRACE_WORKER_URL) ||
-      config.ENABLE_JAVA_TRACING ||
-      !config.isProduction;
+    const javaProvider = this.traceProviders.get("java");
+    const isTraceAllowed = javaProvider ? javaProvider.getCapability().supportsTrace : false;
 
     return baseCaps.map((cap) => {
       const capCopy = { ...cap };
@@ -99,7 +109,7 @@ export class ExecutionService {
         if (!isTraceAllowed) {
           capCopy.limitations = [
             ...capCopy.limitations,
-            "Java tracing is disabled in production pending deployment of an isolated container execution boundary.",
+            "Java tracing requires an isolated container worker (JAVA_TRACE_WORKER_URL). Local execution is disabled in the main application.",
           ];
         }
       }
@@ -188,18 +198,22 @@ export class ExecutionService {
       };
     }
 
-    // Production check
-    if (config.isProduction && !config.JAVA_TRACE_WORKER_URL && !config.ENABLE_JAVA_TRACING) {
+    // Main API check: fail closed if no worker is configured
+    if (config.EXECUTION_ROLE !== "worker" && !config.JAVA_TRACE_WORKER_URL) {
       return {
         success: false,
         language: req.language,
         events: [],
         truncated: false,
         totalEvents: 0,
-        error: "Java tracing is disabled in production without an isolated worker boundary (JAVA_TRACE_WORKER_URL).",
+        error:
+          "Java tracing requires an isolated container worker (JAVA_TRACE_WORKER_URL). " +
+          "The main API strictly refuses to execute user Java code locally.",
         stdout: "",
         stderr: "",
-        limitations: ["Disabled in production pending isolated container worker deployment."],
+        limitations: [
+          "Failing closed to prevent unisolated code execution in the main API.",
+        ],
       };
     }
 

@@ -18,7 +18,8 @@ spec:
         app.kubernetes.io/name: algolens-java-worker
         app.kubernetes.io/component: execution-worker
     spec:
-      # Optional: Uncomment on clusters supporting gVisor (e.g. GKE Sandbox) for kernel-level sandboxing
+      # Optional Hardening Layer: Requires cluster with gVisor installed (e.g., GKE Sandbox or containerd runsc).
+      # Leave commented out unless gVisor is explicitly verified on your target cluster.
       # runtimeClassName: gvisor
 
       securityContext:
@@ -62,6 +63,8 @@ spec:
               value: "production"
             - name: PORT
               value: "5050"
+            - name: EXECUTION_ROLE
+              value: "worker"
             - name: RUN_STANDALONE_WORKER
               value: "true"
 

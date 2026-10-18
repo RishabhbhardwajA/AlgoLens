@@ -20,6 +20,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=5000
+      - EXECUTION_ROLE=api
       - JWT_SECRET=${JWT_SECRET}
       - DATABASE_PATH=/app/backend/data/algolens.db
       - CLIENT_URL=${CLIENT_URL:-http://localhost:5000}
@@ -51,6 +52,11 @@ services:
     container_name: algolens-java-worker
     restart: unless-stopped
     read_only: true
+    environment:
+      - NODE_ENV=production
+      - PORT=5050
+      - EXECUTION_ROLE=worker
+      - RUN_STANDALONE_WORKER=true
     tmpfs:
       - /tmp:rw,size=64m,mode=1777
     deploy:
@@ -62,7 +68,7 @@ services:
     networks:
       - exec-net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:5050/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5050/health"]
       interval: 15s
       timeout: 3s
       retries: 3

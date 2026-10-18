@@ -26,6 +26,7 @@ export interface AppConfig {
   USE_MOCK_EXECUTION: boolean;
   ENABLE_JAVA_TRACING: boolean;
   JAVA_TRACE_WORKER_URL?: string;
+  EXECUTION_ROLE: "api" | "worker";
 }
 
 /**
@@ -40,27 +41,31 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
   const databasePath = env.DATABASE_PATH;
 
   const rawSecret = env.JWT_SECRET?.trim();
+  const executionRole: "api" | "worker" = env.EXECUTION_ROLE === "worker" ? "worker" : "api";
 
   if (isProduction) {
-    if (!rawSecret) {
-      throw new Error(
-        "FATAL SECURITY CONFIG ERROR: JWT_SECRET environment variable is missing in production mode. " +
-          "Refusing to boot server with insecure state. Please define a 32+ character random secret."
-      );
-    }
+    // Only API role requires JWT secrets; worker runs with zero application secrets
+    if (executionRole !== "worker") {
+      if (!rawSecret) {
+        throw new Error(
+          "FATAL SECURITY CONFIG ERROR: JWT_SECRET environment variable is missing in production mode. " +
+            "Refusing to boot server with insecure state. Please define a 32+ character random secret."
+        );
+      }
 
-    if (INSECURE_EXAMPLE_SECRETS.has(rawSecret)) {
-      throw new Error(
-        "FATAL SECURITY CONFIG ERROR: The configured JWT_SECRET matches a documented public example string. " +
-          "Refusing to start in production with an exposed placeholder key."
-      );
-    }
+      if (INSECURE_EXAMPLE_SECRETS.has(rawSecret)) {
+        throw new Error(
+          "FATAL SECURITY CONFIG ERROR: The configured JWT_SECRET matches a documented public example string. " +
+            "Refusing to start in production with an exposed placeholder key."
+        );
+      }
 
-    if (rawSecret.length < 32) {
-      throw new Error(
-        `FATAL SECURITY CONFIG ERROR: In production mode, JWT_SECRET must be at least 32 characters long ` +
-          `(currently ${rawSecret.length} characters).`
-      );
+      if (rawSecret.length < 32) {
+        throw new Error(
+          `FATAL SECURITY CONFIG ERROR: In production mode, JWT_SECRET must be at least 32 characters long ` +
+            `(currently ${rawSecret.length} characters).`
+        );
+      }
     }
 
     if (env.USE_MOCK_EXECUTION === "true") {
@@ -105,6 +110,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     USE_MOCK_EXECUTION: useMockExecution,
     ENABLE_JAVA_TRACING: enableJavaTracing,
     JAVA_TRACE_WORKER_URL: javaTraceWorkerUrl,
+    EXECUTION_ROLE: executionRole,
   };
 }
 

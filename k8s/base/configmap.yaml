@@ -12,3 +12,4 @@ data:
   CLIENT_URL: "http://localhost:5000"
   JAVA_TRACE_WORKER_URL: "http://algolens-java-worker:5050"
   ENABLE_JAVA_TRACING: "true"
+  EXECUTION_ROLE: "api"

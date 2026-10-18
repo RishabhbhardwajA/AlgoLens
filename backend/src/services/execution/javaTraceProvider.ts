@@ -16,7 +16,7 @@ import type {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_LIMITATIONS = [
+export const DEFAULT_JAVA_LIMITATIONS = [
   "Captured up to 500 source line and return events",
   "Arrays serialized up to 50 elements",
   "Strings truncated at 256 characters",
@@ -26,42 +26,44 @@ const DEFAULT_LIMITATIONS = [
 
 const MAX_STREAM_BYTES = 64 * 1024; // 64 KB hard cap for process output streams
 
-export class JavaTraceProvider implements TraceProvider {
+/**
+ * RemoteJavaTraceDispatcher
+ *
+ * Used exclusively by the main API service.
+ * It ONLY communicates with the isolated Java trace worker over HTTP.
+ * Under NO circumstances does it contain or invoke local compiler or debugger processes.
+ * If the worker URL is missing or the worker experiences an outage, it fails closed.
+ */
+export class RemoteJavaTraceDispatcher implements TraceProvider {
   public readonly language = "java";
-  private tracerClasspath: string;
-  private maxCodeLength: number;
+  private workerUrl?: string;
   private defaultTimeoutMs: number;
   private defaultMaxSteps: number;
 
   constructor(options?: {
-    tracerClasspath?: string;
-    maxCodeLength?: number;
+    workerUrl?: string;
     defaultTimeoutMs?: number;
     defaultMaxSteps?: number;
   }) {
-    // Path to the pre-compiled JavaTracer class files
-    this.tracerClasspath =
-      options?.tracerClasspath || path.resolve(__dirname, "../../../dist/tracer/java");
-    this.maxCodeLength = options?.maxCodeLength || 32 * 1024; // 32KB hard limit for source code
-    this.defaultTimeoutMs = options?.defaultTimeoutMs || 6000;  // 6s default timeout
-    this.defaultMaxSteps = options?.defaultMaxSteps || 500;     // 500 steps hard ceiling
+    this.workerUrl = options?.workerUrl || config.JAVA_TRACE_WORKER_URL;
+    this.defaultTimeoutMs = options?.defaultTimeoutMs || 6000;
+    this.defaultMaxSteps = options?.defaultMaxSteps || 500;
   }
 
   public getCapability(): LanguageCapability {
-    const isTraceAllowed =
-      Boolean(config.JAVA_TRACE_WORKER_URL) ||
-      config.ENABLE_JAVA_TRACING ||
-      !config.isProduction;
-
+    const isAvailable = Boolean(this.workerUrl);
     return {
       language: "java",
       displayName: "Java",
       version: "OpenJDK 17 / 24",
       supportsRun: true,
-      supportsTrace: isTraceAllowed,
-      limitations: isTraceAllowed
-        ? DEFAULT_LIMITATIONS
-        : ["Java tracing is disabled in production pending deployment of an isolated container execution boundary."],
+      supportsTrace: isAvailable,
+      limitations: isAvailable
+        ? DEFAULT_JAVA_LIMITATIONS
+        : [
+            "Java tracing requires an isolated container worker (JAVA_TRACE_WORKER_URL).",
+            "The main API fails closed and will not execute untrusted Java code locally.",
+          ],
     };
   }
 
@@ -73,26 +75,27 @@ export class JavaTraceProvider implements TraceProvider {
         events: [],
         truncated: false,
         totalEvents: 0,
-        error: `JavaTraceProvider does not support language '${request.language}'.`,
+        error: `RemoteJavaTraceDispatcher does not support language '${request.language}'.`,
         stdout: "",
         stderr: "",
-        limitations: DEFAULT_LIMITATIONS,
+        limitations: DEFAULT_JAVA_LIMITATIONS,
       };
     }
 
-    // Production security gate: fail closed if no isolated worker and tracing not explicitly enabled
-    if (config.isProduction && !config.JAVA_TRACE_WORKER_URL && !config.ENABLE_JAVA_TRACING) {
+    if (!this.workerUrl) {
       return {
         success: false,
         language: "java",
         events: [],
         truncated: false,
         totalEvents: 0,
-        error: "Java trace execution is disabled in production without a verified isolated worker boundary (JAVA_TRACE_WORKER_URL).",
+        error:
+          "Java tracing is unavailable: JAVA_TRACE_WORKER_URL is not configured. " +
+          "The main API strictly refuses to execute user Java code locally.",
         stdout: "",
         stderr: "",
         limitations: [
-          "Disabled in production to protect host application from unisolated execution risks.",
+          "Failing closed to prevent unisolated code execution in the main API.",
         ],
       };
     }
@@ -107,40 +110,28 @@ export class JavaTraceProvider implements TraceProvider {
         error: "Source code cannot be empty.",
         stdout: "",
         stderr: "",
-        limitations: DEFAULT_LIMITATIONS,
+        limitations: DEFAULT_JAVA_LIMITATIONS,
       };
     }
 
-    if (request.sourceCode.length > this.maxCodeLength) {
+    if (request.sourceCode.length > 32 * 1024) {
       return {
         success: false,
         language: "java",
         events: [],
         truncated: false,
         totalEvents: 0,
-        error: `Source code exceeds maximum permitted size of ${this.maxCodeLength} bytes.`,
+        error: "Source code exceeds maximum permitted size of 32KB.",
         stdout: "",
         stderr: "",
-        limitations: DEFAULT_LIMITATIONS,
+        limitations: DEFAULT_JAVA_LIMITATIONS,
       };
     }
 
-    // 1. If remote worker URL is configured, dispatch trace over HTTP to dedicated worker container
-    if (config.JAVA_TRACE_WORKER_URL) {
-      return await this.dispatchToWorker(request);
-    }
-
-    // 2. Direct local execution (for development, test, or hardened worker process)
-    return await this.executeLocal(request);
-  }
-
-  /**
-   * Dispatch trace request to dedicated isolated container worker service
-   */
-  private async dispatchToWorker(request: TraceRequest): Promise<TraceResult> {
-    const workerEndpoint = `${config.JAVA_TRACE_WORKER_URL?.replace(/\/+$/, "")}/trace`;
+    const workerEndpoint = `${this.workerUrl.replace(/\/+$/, "")}/trace`;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), (request.timeoutMs || this.defaultTimeoutMs) + 2000);
+    const timeoutMs = request.timeoutMs || this.defaultTimeoutMs;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs + 2000);
 
     try {
       const res = await fetch(workerEndpoint, {
@@ -150,7 +141,7 @@ export class JavaTraceProvider implements TraceProvider {
           language: "java",
           sourceCode: request.sourceCode,
           maxSteps: Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500),
-          timeoutMs: Math.min(request.timeoutMs || this.defaultTimeoutMs, 10000),
+          timeoutMs: Math.min(timeoutMs, 10000),
         }),
         signal: controller.signal,
       });
@@ -163,10 +154,12 @@ export class JavaTraceProvider implements TraceProvider {
           events: [],
           truncated: false,
           totalEvents: 0,
-          error: errJson.message || `Java trace worker returned HTTP ${res.status}`,
+          error:
+            errJson.message ||
+            `Java trace worker returned HTTP ${res.status}. The main API will not fall back to local execution.`,
           stdout: "",
           stderr: "",
-          limitations: DEFAULT_LIMITATIONS,
+          limitations: DEFAULT_JAVA_LIMITATIONS,
         };
       }
 
@@ -180,20 +173,135 @@ export class JavaTraceProvider implements TraceProvider {
         truncated: false,
         totalEvents: 0,
         error: isTimeout
-          ? `Java trace worker request timed out.`
-          : `Failed to communicate with Java trace worker: ${err.message}`,
+          ? "Java trace worker request timed out. The main API will not fall back to local execution."
+          : `Java trace worker is unavailable (${err.message}). The main API will not fall back to local execution.`,
         stdout: "",
         stderr: "",
-        limitations: DEFAULT_LIMITATIONS,
+        limitations: [
+          "Failing closed during worker outage to prevent unisolated local execution.",
+        ],
       };
     } finally {
       clearTimeout(timeout);
     }
   }
+}
 
-  /**
-   * Local execution using direct process invocation, process tree killing, and strict resource bounds
-   */
+/**
+ * LocalJavaTraceExecutor
+ *
+ * Dedicated local execution engine for Java JDI debugging.
+ * Authorized ONLY inside the dedicated worker container (EXECUTION_ROLE === 'worker')
+ * or via explicit dependency injection in test harnesses.
+ *
+ * Enforces:
+ * - Direct process spawning (shell: false)
+ * - Process tree termination on timeout
+ * - Output stream hard truncation (64KB)
+ * - JDI heap memory bounds (-Xmx64m -XX:+UseSerialGC -XX:MaxRAM=128m)
+ * - Ephemeral directory cleanup with operational error logging
+ */
+export class LocalJavaTraceExecutor implements TraceProvider {
+  public readonly language = "java";
+  private tracerClasspath: string;
+  private maxCodeLength: number;
+  private defaultTimeoutMs: number;
+  private defaultMaxSteps: number;
+  private authorizedForLocal: boolean;
+
+  constructor(options?: {
+    tracerClasspath?: string;
+    maxCodeLength?: number;
+    defaultTimeoutMs?: number;
+    defaultMaxSteps?: number;
+    authorizedForLocal?: boolean;
+  }) {
+    this.authorizedForLocal =
+      options?.authorizedForLocal ??
+      (config.EXECUTION_ROLE === "worker" || process.env.NODE_ENV === "test");
+
+    this.tracerClasspath =
+      options?.tracerClasspath || path.resolve(__dirname, "../../../dist/tracer/java");
+    this.maxCodeLength = options?.maxCodeLength || 32 * 1024;
+    this.defaultTimeoutMs = options?.defaultTimeoutMs || 6000;
+    this.defaultMaxSteps = options?.defaultMaxSteps || 500;
+  }
+
+  public getCapability(): LanguageCapability {
+    return {
+      language: "java",
+      displayName: "Java",
+      version: "OpenJDK 17 / 24",
+      supportsRun: true,
+      supportsTrace: true,
+      limitations: DEFAULT_JAVA_LIMITATIONS,
+    };
+  }
+
+  async trace(request: TraceRequest): Promise<TraceResult> {
+    if (!this.authorizedForLocal) {
+      return {
+        success: false,
+        language: "java",
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error:
+          "Unauthorized local Java execution: LocalJavaTraceExecutor is restricted to " +
+          "the dedicated worker role (EXECUTION_ROLE=worker). The main application cannot execute local JVM code.",
+        stdout: "",
+        stderr: "",
+        limitations: [
+          "Security violation: Local execution attempted outside authorized worker boundary.",
+        ],
+      };
+    }
+
+    if (request.language.toLowerCase() !== "java") {
+      return {
+        success: false,
+        language: request.language,
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: `LocalJavaTraceExecutor does not support language '${request.language}'.`,
+        stdout: "",
+        stderr: "",
+        limitations: DEFAULT_JAVA_LIMITATIONS,
+      };
+    }
+
+    if (!request.sourceCode || request.sourceCode.trim().length === 0) {
+      return {
+        success: false,
+        language: "java",
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: "Source code cannot be empty.",
+        stdout: "",
+        stderr: "",
+        limitations: DEFAULT_JAVA_LIMITATIONS,
+      };
+    }
+
+    if (request.sourceCode.length > this.maxCodeLength) {
+      return {
+        success: false,
+        language: "java",
+        events: [],
+        truncated: false,
+        totalEvents: 0,
+        error: `Source code exceeds maximum permitted size of ${this.maxCodeLength} bytes.`,
+        stdout: "",
+        stderr: "",
+        limitations: DEFAULT_JAVA_LIMITATIONS,
+      };
+    }
+
+    return await this.executeLocal(request);
+  }
+
   private async executeLocal(request: TraceRequest): Promise<TraceResult> {
     const className = this.extractClassName(request.sourceCode) || "Solution";
     const runId = randomUUID();
@@ -204,10 +312,8 @@ export class JavaTraceProvider implements TraceProvider {
       await fs.promises.mkdir(sandboxDir, { recursive: true });
       await fs.promises.writeFile(sourceFilePath, request.sourceCode, "utf8");
 
-      // Verify that JavaTracer.class is pre-compiled and available
       this.verifyTracerArtifacts();
 
-      // 1. Compile with debug info (-g) using direct process invocation (shell: false)
       const timeoutMs = Math.min(request.timeoutMs || this.defaultTimeoutMs, 10000);
       const compileResult = await this.compileJava(sandboxDir, className, timeoutMs);
       if (!compileResult.success) {
@@ -221,14 +327,12 @@ export class JavaTraceProvider implements TraceProvider {
           compilationOutput: compileResult.output,
           stdout: "",
           stderr: compileResult.output,
-          limitations: DEFAULT_LIMITATIONS,
+          limitations: DEFAULT_JAVA_LIMITATIONS,
         };
       }
 
-      // 2. Launch JavaTracer with JDI using direct process invocation and process tree killing
       const maxSteps = Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500);
       const traceOutput = await this.runTracer(sandboxDir, className, maxSteps, timeoutMs);
-
       return traceOutput;
     } catch (err: any) {
       return {
@@ -240,10 +344,9 @@ export class JavaTraceProvider implements TraceProvider {
         error: err.message || "Unknown error during Java tracing execution",
         stdout: "",
         stderr: "",
-        limitations: DEFAULT_LIMITATIONS,
+        limitations: DEFAULT_JAVA_LIMITATIONS,
       };
     } finally {
-      // Ephemeral cleanup with actionable operational error logging
       try {
         await fs.promises.rm(sandboxDir, { recursive: true, force: true });
       } catch (cleanupErr: any) {
@@ -290,7 +393,6 @@ export class JavaTraceProvider implements TraceProvider {
     return new Promise((resolve) => {
       const javaFile = `${className}.java`;
 
-      // Direct process invocation: shell: false, strict argument array, serial GC & memory bound
       const javac: ChildProcess = spawn(
         "javac",
         ["-g", "-encoding", "UTF-8", "-J-Xmx64m", "-J-XX:+UseSerialGC", javaFile],
@@ -360,7 +462,6 @@ export class JavaTraceProvider implements TraceProvider {
     timeoutMs: number
   ): Promise<TraceResult> {
     return new Promise((resolve) => {
-      // Direct process invocation: shell: false, clean arguments without shell escaping
       const java: ChildProcess = spawn(
         "java",
         [
@@ -404,7 +505,7 @@ export class JavaTraceProvider implements TraceProvider {
             error: `Execution timed out after ${timeoutMs}ms. Process tree terminated.`,
             stdout,
             stderr,
-            limitations: DEFAULT_LIMITATIONS,
+            limitations: DEFAULT_JAVA_LIMITATIONS,
           });
         }
       }, timeoutMs);
@@ -430,7 +531,6 @@ export class JavaTraceProvider implements TraceProvider {
           finished = true;
           clearTimeout(timer);
 
-          // Find JSON in stdout
           const jsonStart = stdout.indexOf("{");
           const jsonEnd = stdout.lastIndexOf("}");
 
@@ -449,7 +549,7 @@ export class JavaTraceProvider implements TraceProvider {
                 error: `Failed to parse debugger trace JSON: ${parseErr.message}`,
                 stdout,
                 stderr,
-                limitations: DEFAULT_LIMITATIONS,
+                limitations: DEFAULT_JAVA_LIMITATIONS,
               });
               return;
             }
@@ -464,7 +564,7 @@ export class JavaTraceProvider implements TraceProvider {
             error: code !== 0 ? `Debugger exited with code ${code}` : "No trace output produced",
             stdout,
             stderr,
-            limitations: DEFAULT_LIMITATIONS,
+            limitations: DEFAULT_JAVA_LIMITATIONS,
           });
         }
       });
@@ -482,10 +582,49 @@ export class JavaTraceProvider implements TraceProvider {
             error: `Failed to launch Java debugger: ${err.message}`,
             stdout: "",
             stderr: "",
-            limitations: DEFAULT_LIMITATIONS,
+            limitations: DEFAULT_JAVA_LIMITATIONS,
           });
         }
       });
     });
+  }
+}
+
+/**
+ * JavaTraceProvider
+ * Backward-compatible provider that selects RemoteJavaTraceDispatcher or LocalJavaTraceExecutor
+ * based on the explicit EXECUTION_ROLE or supplied options.
+ */
+export class JavaTraceProvider implements TraceProvider {
+  public readonly language = "java";
+  private delegate: TraceProvider;
+
+  constructor(options?: {
+    role?: "api" | "worker";
+    workerUrl?: string;
+    tracerClasspath?: string;
+    maxCodeLength?: number;
+    defaultTimeoutMs?: number;
+    defaultMaxSteps?: number;
+    authorizedForLocal?: boolean;
+  }) {
+    const effectiveRole = options?.role || config.EXECUTION_ROLE;
+    if (effectiveRole === "worker" || options?.authorizedForLocal) {
+      this.delegate = new LocalJavaTraceExecutor(options);
+    } else {
+      this.delegate = new RemoteJavaTraceDispatcher({
+        workerUrl: options?.workerUrl,
+        defaultTimeoutMs: options?.defaultTimeoutMs,
+        defaultMaxSteps: options?.defaultMaxSteps,
+      });
+    }
+  }
+
+  public getCapability(): LanguageCapability {
+    return this.delegate.getCapability();
+  }
+
+  public async trace(request: TraceRequest): Promise<TraceResult> {
+    return await this.delegate.trace(request);
   }
 }

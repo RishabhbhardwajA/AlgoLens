@@ -27,6 +27,10 @@ COPY frontend/ frontend/
 COPY backend/ backend/
 COPY tsconfig.json tsconfig.node.json ./
 
+# Pre-compile JavaTracer bytecode so test suite can verify debugger execution
+RUN mkdir -p backend/dist/tracer/java && \
+    javac --add-modules jdk.jdi -d backend/dist/tracer/java backend/src/tracer/java/com/algolens/tracer/JavaTracer.java
+
 # Test Gate: Enforce that all backend and frontend unit/regression tests pass
 RUN npm test
 

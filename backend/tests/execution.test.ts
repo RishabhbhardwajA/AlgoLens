@@ -1,7 +1,11 @@
 import app from "../src/app.js";
 import http from "node:http";
 import workerApp from "../src/tracer/java/worker/server.js";
-import { JavaTraceProvider } from "../src/services/execution/javaTraceProvider.js";
+import {
+  JavaTraceProvider,
+  LocalJavaTraceExecutor,
+  RemoteJavaTraceDispatcher,
+} from "../src/services/execution/javaTraceProvider.js";
 import { validateEnvironment } from "../src/config/env.js";
 import { executionService } from "../src/services/execution/executionService.js";
 import { MockExecutionProvider } from "../src/services/execution/mockExecutionProvider.js";
@@ -9,8 +13,12 @@ import { MockExecutionProvider } from "../src/services/execution/mockExecutionPr
 async function runExecutionTests() {
   console.log("=== STARTING HARDENED MULTI-LANGUAGE EXECUTION & TRACING TESTS ===");
 
-  // Explicitly inject MockExecutionProvider for automated testing
+  // Explicitly inject providers for automated test environment
   executionService.setExecutionProvider(new MockExecutionProvider());
+  executionService.setTraceProvider(
+    "java",
+    new LocalJavaTraceExecutor({ authorizedForLocal: true })
+  );
 
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(5189, resolve));
@@ -148,7 +156,7 @@ async function runExecutionTests() {
     // Test 4: Real Java Trace Provider - Loop & Array Mutation
     // -------------------------------------------------------------
     console.log("\n[Test 4] Testing Real Java Debugger Tracing (Loop & Array)...");
-    const javaTracer = new JavaTraceProvider();
+    const javaTracer = new LocalJavaTraceExecutor({ authorizedForLocal: true });
 
     const loopJavaCode = `
 public class Solution {
@@ -506,6 +514,79 @@ public class Solution {
     } finally {
       workerServer.close();
     }
+
+    // -------------------------------------------------------------
+    // Test 13: Regression Test — Absent Worker URL Fails Closed
+    // Proves that when JAVA_TRACE_WORKER_URL is missing, the main API fails closed
+    // and never triggers local compiler/debugger execution.
+    // -------------------------------------------------------------
+    console.log("\n[Test 13] Testing Absent Worker URL Fails Closed in Main API...");
+    const dispatcherNoUrl = new RemoteJavaTraceDispatcher({ workerUrl: undefined });
+    const absentResult = await dispatcherNoUrl.trace({
+      language: "java",
+      sourceCode: "public class Solution { public static void main(String[] args) {} }",
+    });
+
+    if (absentResult.success) {
+      throw new Error("Dispatcher with missing worker URL must NOT succeed");
+    }
+    if (!absentResult.error?.includes("JAVA_TRACE_WORKER_URL is not configured")) {
+      throw new Error(`Expected error about missing worker URL, got: ${absentResult.error}`);
+    }
+    if (!absentResult.error?.includes("refuses to execute user Java code locally")) {
+      throw new Error("Expected explicit statement refusing local execution");
+    }
+    console.log("✓ Absent JAVA_TRACE_WORKER_URL strictly fails closed and refuses local execution.");
+    testsPassed++;
+
+    // -------------------------------------------------------------
+    // Test 14: Regression Test — Worker Outage Fails Closed
+    // Proves that during worker downtime / connection refused, the main API
+    // fails closed and NEVER falls back to local execution.
+    // -------------------------------------------------------------
+    console.log("\n[Test 14] Testing Worker Outage Fails Closed (No Local Fallback)...");
+    // Point to a dead/unused port (59999) where no server is listening
+    const dispatcherDeadWorker = new RemoteJavaTraceDispatcher({
+      workerUrl: "http://127.0.0.1:59999",
+      defaultTimeoutMs: 1000,
+    });
+    const outageResult = await dispatcherDeadWorker.trace({
+      language: "java",
+      sourceCode: "public class Solution { public static void main(String[] args) {} }",
+      timeoutMs: 1000,
+    });
+
+    if (outageResult.success) {
+      throw new Error("Trace during worker outage must NOT succeed");
+    }
+    if (!outageResult.error?.includes("unavailable") && !outageResult.error?.includes("timed out")) {
+      throw new Error(`Expected worker unavailable error, got: ${outageResult.error}`);
+    }
+    if (!outageResult.error?.includes("will not fall back to local execution")) {
+      throw new Error("Expected confirmation that main API will not fall back to local execution");
+    }
+    console.log("✓ Worker outage strictly fails closed with no fallback to local execution.");
+    testsPassed++;
+
+    // -------------------------------------------------------------
+    // Test 15: Regression Test — Unauthorized Local Execution Denied
+    // Proves that LocalJavaTraceExecutor rejects execution unless explicitly authorized
+    // -------------------------------------------------------------
+    console.log("\n[Test 15] Testing LocalJavaTraceExecutor Authorization Gate...");
+    const unauthorizedExecutor = new LocalJavaTraceExecutor({ authorizedForLocal: false });
+    const unauthResult = await unauthorizedExecutor.trace({
+      language: "java",
+      sourceCode: "public class Solution { public static void main(String[] args) {} }",
+    });
+
+    if (unauthResult.success) {
+      throw new Error("Unauthorized executor must NOT succeed");
+    }
+    if (!unauthResult.error?.includes("Unauthorized local Java execution")) {
+      throw new Error(`Expected unauthorized error, got: ${unauthResult.error}`);
+    }
+    console.log("✓ Unauthorized LocalJavaTraceExecutor invocation rejected with security error.");
+    testsPassed++;
 
     // -------------------------------------------------------------
     // Summary

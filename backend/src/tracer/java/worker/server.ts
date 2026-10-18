@@ -1,6 +1,9 @@
 import express, { type Request, type Response } from "express";
-import { JavaTraceProvider } from "../../../services/execution/javaTraceProvider.js";
+import { LocalJavaTraceExecutor } from "../../../services/execution/javaTraceProvider.js";
 import type { TraceRequest } from "../../../types/execution.js";
+
+// Ensure worker role is explicitly flagged in environment
+process.env.EXECUTION_ROLE = "worker";
 
 const app = express();
 const port = parseInt(process.env.PORT || "5050", 10);
@@ -14,12 +17,14 @@ app.use((_req, res, next) => {
   next();
 });
 
-const traceProvider = new JavaTraceProvider();
+// The worker process exclusively runs LocalJavaTraceExecutor with explicit local execution authorization
+const traceExecutor = new LocalJavaTraceExecutor({ authorizedForLocal: true });
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({
     status: "ok",
     service: "AlgoLens Java Trace Worker",
+    role: "worker",
     isolation: "Containerized Headless JDI Sandbox",
     timestamp: new Date().toISOString(),
   });
@@ -52,7 +57,7 @@ app.post("/trace", async (req: Request, res: Response) => {
     timeoutMs: boundedTimeout,
   };
 
-  const result = await traceProvider.trace(traceReq);
+  const result = await traceExecutor.trace(traceReq);
   return res.json(result);
 });
 
@@ -60,7 +65,7 @@ app.post("/trace", async (req: Request, res: Response) => {
 const isDirectExecution = process.argv[1]?.includes("server") && !process.argv[1]?.includes("test");
 if (isDirectExecution || process.env.RUN_STANDALONE_WORKER === "true") {
   app.listen(port, "0.0.0.0", () => {
-    console.log(`[AlgoLens Java Trace Worker] Listening on port ${port} (isolated boundary)`);
+    console.log(`[AlgoLens Java Trace Worker] Listening on port ${port} (isolated worker role)`);
   });
 }
 
