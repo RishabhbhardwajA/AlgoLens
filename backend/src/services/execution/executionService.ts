@@ -35,6 +35,8 @@ export class ExecutionService {
   private maxStdinLength: number = 16 * 1024;  // 16 KB hard limit
 
   // Concurrency tracking to prevent resource starvation
+  private activeRuns: number = 0;
+  private readonly maxConcurrentRuns: number = 5;
   private activeTraces: number = 0;
   private readonly maxConcurrentTraces: number = 3;
 
@@ -159,11 +161,24 @@ export class ExecutionService {
       memoryLimitKb: Math.min(req.memoryLimitKb || 64000, 128000), // Max 128MB
     };
 
-    const token = await this.executionProvider.submit(boundedReq);
-    if (this.executionProvider.getResult) {
-      return await this.executionProvider.getResult(token);
+    if (this.activeRuns >= this.maxConcurrentRuns) {
+      const busyErr = new Error(
+        `Server is currently processing maximum concurrent runs (${this.maxConcurrentRuns}). Please retry shortly.`
+      ) as Error & { status?: number };
+      busyErr.status = 503;
+      throw busyErr;
     }
-    return await this.executionProvider.getSubmission(token);
+
+    this.activeRuns++;
+    try {
+      const token = await this.executionProvider.submit(boundedReq);
+      if (this.executionProvider.getResult) {
+        return await this.executionProvider.getResult(token);
+      }
+      return await this.executionProvider.getSubmission(token);
+    } finally {
+      this.activeRuns = Math.max(0, this.activeRuns - 1);
+    }
   }
 
   /**

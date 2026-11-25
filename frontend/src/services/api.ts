@@ -161,6 +161,10 @@ export const authApi = {
     return request<{ success: boolean; user: User; stats: UserStats }>("/auth/me");
   },
 
+  async getProviders(): Promise<{ success: boolean; googleEnabled: boolean; emailOtpEnabled: boolean }> {
+    return request<{ success: boolean; googleEnabled: boolean; emailOtpEnabled: boolean }>("/auth/providers");
+  },
+
   async updateProfile(updates: { name?: string; bio?: string; avatar_url?: string }): Promise<{ success: boolean; user: User }> {
     return request<{ success: boolean; user: User }>("/auth/profile", {
       method: "PUT",

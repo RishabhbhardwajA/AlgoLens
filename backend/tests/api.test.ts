@@ -608,7 +608,89 @@ async function runApiTests() {
     }
     console.log(`✓ SEO endpoints, ${PUBLIC_ALGORITHMS.length}-algorithm sitemap, manifests & SSR metadata verified.`);
 
-    console.log("\n🎉 ALL 16 BACKEND HTTP, SECURITY, SEO & AUTH TESTS PASSED!");
+    // 17. Google OAuth Error Handling (Providers, Invalid State Popup/JSON, Unconfigured Popup)
+    console.log("\n[Test 17] Testing Google OAuth Error Handling...");
+    const providersRes = await fetch(`${baseUrl}/auth/providers`);
+    if (providersRes.status !== 200) {
+      throw new Error(`Expected 200 for /auth/providers, got ${providersRes.status}`);
+    }
+    const providersJson = await providersRes.json();
+    if (typeof providersJson.googleEnabled !== "boolean" || !providersJson.emailOtpEnabled) {
+      throw new Error(`Invalid /auth/providers payload: ${JSON.stringify(providersJson)}`);
+    }
+
+    const cbHtmlRes = await fetch(`${baseUrl}/auth/google/callback?code=fake_code&state=bad_nonce`, {
+      headers: { Accept: "text/html" },
+      redirect: "manual",
+    });
+    const cbHtmlText = await cbHtmlRes.text();
+    if (
+      cbHtmlRes.status !== 400 ||
+      !cbHtmlRes.headers.get("content-type")?.includes("text/html") ||
+      !cbHtmlText.includes("ALGOLENS_OAUTH_ERROR") ||
+      !cbHtmlText.includes("invalid_state")
+    ) {
+      throw new Error(`Expected popup-safe HTML error on invalid OAuth state callback, got ${cbHtmlRes.status}`);
+    }
+
+    const cbJsonRes = await fetch(`${baseUrl}/auth/google/callback?code=fake_code&state=bad_nonce`, {
+      headers: { Accept: "application/json" },
+    });
+    const cbJsonData = await cbJsonRes.json();
+    if (cbJsonRes.status !== 400 || cbJsonData.code !== "invalid_state") {
+      throw new Error(`Expected JSON code='invalid_state' for API caller, got ${JSON.stringify(cbJsonData)}`);
+    }
+
+    const { renderOAuthPopupHtml } = await import("../src/controllers/authController.js");
+    const popupHtml = renderOAuthPopupHtml({
+      status: "error",
+      errorCode: "not_configured",
+      message: "OAuth missing <test>",
+      targetOrigin: "http://localhost:5173",
+      fallbackUrl: "http://localhost:5173/login?oauthError=not_configured",
+    });
+    if (
+      !popupHtml.includes("ALGOLENS_OAUTH_ERROR") ||
+      !popupHtml.includes("not_configured") ||
+      popupHtml.includes("OAuth missing <test>")
+    ) {
+      throw new Error("renderOAuthPopupHtml failed XSS escaping or postMessage payload check");
+    }
+    console.log("✓ Google OAuth providers endpoint, popup HTML error handling, and XSS escaping verified.");
+
+    // 18. Crash-Prevention Guards: 256KB Payload Ceiling (413) & Gemini Rate Limiter (429)
+    console.log("\n[Test 18] Testing 256KB Body Size Cap (413) & Per-User Gemini Rate Limit (429)...");
+    const hugeBodyRes = await fetch(`${baseUrl}/gemini/tutor`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: freshCookie },
+      body: JSON.stringify({ algorithmId: "binary-search", code: "x".repeat(300_000), step: { line: 1 } }),
+    });
+    if (hugeBodyRes.status !== 413) {
+      throw new Error(`Expected 413 Payload Too Large for >256kb body, got ${hugeBodyRes.status}`);
+    }
+
+    let gotRateLimited = false;
+    for (let i = 0; i < 7; i++) {
+      const rlRes = await fetch(`${baseUrl}/gemini/tutor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: freshCookie },
+        body: JSON.stringify({ algorithmId: "binary-search", step: { line: 1 } }),
+      });
+      if (rlRes.status === 429) {
+        const rlJson = await rlRes.json();
+        if (rlJson.error !== "Too Many Requests") {
+          throw new Error(`Unexpected 429 payload: ${JSON.stringify(rlJson)}`);
+        }
+        gotRateLimited = true;
+        break;
+      }
+    }
+    if (!gotRateLimited) {
+      throw new Error("Expected Gemini rate limiter to enforce 429 within burst threshold");
+    }
+    console.log("✓ 256KB payload cap (413) and Gemini per-user burst limiter (429) verified.");
+
+    console.log("\n🎉 ALL 18 BACKEND HTTP, SECURITY, SEO & AUTH TESTS PASSED!");
   } finally {
     server.close();
   }

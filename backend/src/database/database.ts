@@ -28,8 +28,12 @@ if (!fs.existsSync(DB_PATH)) {
 // Initialize SQLite database instance
 export const db = new DatabaseSync(DB_PATH);
 
-// High-performance WAL mode and strict foreign key integrity
+// High-performance WAL mode, lock wait timeout, and bounded memory cache
 db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA busy_timeout = 5000;");
+db.exec("PRAGMA synchronous = NORMAL;");
+db.exec("PRAGMA temp_store = MEMORY;");
+db.exec("PRAGMA cache_size = -16000;");
 db.exec("PRAGMA foreign_keys = ON;");
 
 // Initialize schema tables
@@ -129,6 +133,14 @@ export function initDatabase(): void {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS ai_usage_daily (
+      day TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (day, scope)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_verifications(email);
     CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id);
@@ -137,6 +149,7 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_resets_token ON password_resets(token);
     CREATE INDEX IF NOT EXISTS idx_challenges_user ON user_challenge_attempts(user_id);
     CREATE INDEX IF NOT EXISTS idx_trace_bookmarks_user ON bookmarked_traces(user_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_day ON ai_usage_daily(day);
   `);
 
   // Safe idempotent migration for existing databases lacking Google OAuth / nullable password_hash
@@ -190,6 +203,22 @@ export function initDatabase(): void {
     }
   } else {
     db.exec("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);");
+  }
+}
+
+/**
+ * Removes expired OTP records, expired/used password reset tokens, and stale daily AI counters
+ * so SQLite remains compact over long uptimes.
+ */
+export function cleanupExpiredAuthRecords(): void {
+  try {
+    const nowIso = new Date().toISOString();
+    const weekAgoDay = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    db.prepare("DELETE FROM otp_verifications WHERE expires_at < ?").run(nowIso);
+    db.prepare("DELETE FROM password_resets WHERE expires_at < ? OR used = 1").run(nowIso);
+    db.prepare("DELETE FROM ai_usage_daily WHERE day < ?").run(weekAgoDay);
+  } catch (err) {
+    console.warn("[SQLite Cleanup Warning]:", err);
   }
 }
 

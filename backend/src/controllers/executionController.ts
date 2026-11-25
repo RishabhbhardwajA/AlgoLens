@@ -81,7 +81,8 @@ export const executionController = {
       if (!traceResult.success) {
         if (
           traceResult.error?.includes("JAVA_TRACE_WORKER_URL is not configured") ||
-          traceResult.error?.includes("unavailable")
+          traceResult.error?.includes("unavailable") ||
+          traceResult.error?.includes("maximum concurrent")
         ) {
           return res.status(503).json(traceResult);
         }

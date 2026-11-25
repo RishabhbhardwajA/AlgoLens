@@ -3,6 +3,7 @@ import { AlertCircle } from "lucide-react";
 import { AuthFormPanel } from "@/components/Auth/AuthFormPanel";
 import { Logo } from "@/components/common/Logo";
 import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { mapOAuthErrorMessage } from "@/utils/oauthErrors";
 
 export default function Login() {
   useDocumentMeta({
@@ -53,9 +54,9 @@ export default function Login() {
           </div>
 
           {oauthError && (
-            <div className="flex items-center gap-2 p-3 mb-4 rounded-2xl bg-rose-50/90 border border-rose-200 text-xs text-rose-700 backdrop-blur-sm">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>Google sign-in was cancelled. You can retry or sign in with email.</span>
+            <div className="flex items-start gap-2 p-3 mb-4 rounded-2xl bg-rose-50/90 border border-rose-200 text-xs text-rose-700 backdrop-blur-sm">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{mapOAuthErrorMessage(oauthError)}</span>
             </div>
           )}
 

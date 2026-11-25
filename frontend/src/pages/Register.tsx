@@ -1,7 +1,9 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+import { AlertCircle } from "lucide-react";
 import { AuthFormPanel } from "@/components/Auth/AuthFormPanel";
 import { Logo } from "@/components/common/Logo";
 import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { mapOAuthErrorMessage } from "@/utils/oauthErrors";
 
 export default function Register() {
   useDocumentMeta({
@@ -12,6 +14,8 @@ export default function Register() {
   });
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const oauthError = new URLSearchParams(location.search).get("oauthError");
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12 relative overflow-hidden">
@@ -45,6 +49,13 @@ export default function Register() {
               Start mastering DSA with live JDI traces, predictions, and Gemini tutoring.
             </p>
           </div>
+
+          {oauthError && (
+            <div className="flex items-start gap-2 p-3 mb-4 rounded-2xl bg-rose-50/90 border border-rose-200 text-xs text-rose-700 backdrop-blur-sm">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{mapOAuthErrorMessage(oauthError)}</span>
+            </div>
+          )}
 
           <AuthFormPanel
             initialMode="register"

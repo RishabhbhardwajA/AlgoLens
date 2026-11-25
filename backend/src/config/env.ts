@@ -1,6 +1,26 @@
 import dotenv from "dotenv";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load root workspace .env first, then backend/.env fallback (without overriding existing OS env vars)
+const envCandidates = [
+  path.resolve(__dirname, "../../../.env"),
+  path.resolve(__dirname, "../../.env"),
+  path.resolve(process.cwd(), ".env"),
+];
+const seenEnvPaths = new Set<string>();
+for (const envPath of envCandidates) {
+  const normalized = path.resolve(envPath);
+  if (seenEnvPaths.has(normalized)) continue;
+  seenEnvPaths.add(normalized);
+  if (fs.existsSync(normalized)) {
+    dotenv.config({ path: normalized, quiet: true });
+  }
+}
 
 const INSECURE_EXAMPLE_SECRETS = new Set([
   "algolens-super-secret-jwt-key-2026",
@@ -30,10 +50,14 @@ export interface AppConfig {
   EXECUTION_ROLE: "api" | "worker";
   GEMINI_API_KEY?: string;
   GEMINI_MODEL: string;
+  GEMINI_ENABLED: boolean;
+  GEMINI_USER_DAILY_CAP: number;
+  GEMINI_GLOBAL_DAILY_CAP: number;
+  GEMINI_MAX_OUTPUT_TOKENS: number;
+  GEMINI_CACHE_TTL_MS: number;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REDIRECT_URI: string;
-  RESEND_API_KEY?: string;
   EMAIL_FROM: string;
   SMTP_HOST?: string;
   SMTP_PORT?: number;
@@ -111,13 +135,29 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
   const javaTraceWorkerUrl = env.JAVA_TRACE_WORKER_URL?.trim();
   const geminiApiKey = executionRole !== "worker" ? env.GEMINI_API_KEY?.trim() : undefined;
   const geminiModel = env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  const geminiEnabled = env.GEMINI_ENABLED !== "false";
+
+  const parsedUserCap = parseInt(env.GEMINI_USER_DAILY_CAP || "10", 10);
+  const geminiUserDailyCap =
+    Number.isFinite(parsedUserCap) && parsedUserCap >= 0 ? Math.min(parsedUserCap, 100) : 10;
+
+  const parsedGlobalCap = parseInt(env.GEMINI_GLOBAL_DAILY_CAP || "80", 10);
+  const geminiGlobalDailyCap =
+    Number.isFinite(parsedGlobalCap) && parsedGlobalCap >= 0 ? Math.min(parsedGlobalCap, 1000) : 80;
+
+  const parsedMaxTokens = parseInt(env.GEMINI_MAX_OUTPUT_TOKENS || "420", 10);
+  const geminiMaxOutputTokens =
+    Number.isFinite(parsedMaxTokens) && parsedMaxTokens >= 150 ? Math.min(parsedMaxTokens, 800) : 420;
+
+  const parsedCacheTtl = parseInt(env.GEMINI_CACHE_TTL_MS || "900000", 10);
+  const geminiCacheTtlMs =
+    Number.isFinite(parsedCacheTtl) && parsedCacheTtl >= 0 ? parsedCacheTtl : 900_000;
 
   const googleClientId = executionRole !== "worker" ? env.GOOGLE_CLIENT_ID?.trim() : undefined;
   const googleClientSecret = executionRole !== "worker" ? env.GOOGLE_CLIENT_SECRET?.trim() : undefined;
   const googleRedirectUri =
     env.GOOGLE_REDIRECT_URI?.trim() || `http://localhost:${isNaN(port) ? 5000 : port}/api/auth/google/callback`;
 
-  const resendApiKey = executionRole !== "worker" ? env.RESEND_API_KEY?.trim() : undefined;
   const emailFrom = env.EMAIL_FROM?.trim() || "AlgoLens <noreply@algolens.dev>";
   const smtpHost = executionRole !== "worker" ? env.SMTP_HOST?.trim() : undefined;
   const smtpPort = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 587;
@@ -141,10 +181,14 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     EXECUTION_ROLE: executionRole,
     GEMINI_API_KEY: geminiApiKey,
     GEMINI_MODEL: geminiModel,
+    GEMINI_ENABLED: geminiEnabled,
+    GEMINI_USER_DAILY_CAP: geminiUserDailyCap,
+    GEMINI_GLOBAL_DAILY_CAP: geminiGlobalDailyCap,
+    GEMINI_MAX_OUTPUT_TOKENS: geminiMaxOutputTokens,
+    GEMINI_CACHE_TTL_MS: geminiCacheTtlMs,
     GOOGLE_CLIENT_ID: googleClientId,
     GOOGLE_CLIENT_SECRET: googleClientSecret,
     GOOGLE_REDIRECT_URI: googleRedirectUri,
-    RESEND_API_KEY: resendApiKey,
     EMAIL_FROM: emailFrom,
     SMTP_HOST: smtpHost,
     SMTP_PORT: isNaN(smtpPort) ? 587 : smtpPort,

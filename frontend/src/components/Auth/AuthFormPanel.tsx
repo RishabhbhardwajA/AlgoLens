@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuthStore } from "@/store/useAuthStore";
+import { authApi } from "@/services/api";
+import { mapOAuthErrorMessage } from "@/utils/oauthErrors";
 import {
   User as UserIcon,
   Mail,
@@ -59,11 +61,29 @@ export function AuthFormPanel({
   const otpInputRefs = useRef<Array<HTMLInputElement | null>>([]);
   const oauthPopupRef = useRef<Window | null>(null);
   const popupPollTimerRef = useRef<number | null>(null);
+  const popupCloseGraceTimerRef = useRef<number | null>(null);
+  const oauthTimeoutRef = useRef<number | null>(null);
+  const oauthOutcomeRef = useRef<"none" | "success" | "error">("none");
   const [cooldown, setCooldown] = useState<number>(otpCooldownSeconds || 0);
   const [googlePending, setGooglePending] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     clearError();
+    let cancelled = false;
+    authApi
+      .getProviders()
+      .then((res) => {
+        if (!cancelled) {
+          setGoogleEnabled(Boolean(res.googleEnabled));
+        }
+      })
+      .catch(() => {
+        // Non-blocking: fall back to server redirect/popup error handling if unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [clearError]);
 
   useEffect(() => {
@@ -83,6 +103,21 @@ export function AuthFormPanel({
     return () => clearInterval(timer);
   }, [cooldown]);
 
+  const clearOAuthTimers = () => {
+    if (popupPollTimerRef.current !== null) {
+      window.clearInterval(popupPollTimerRef.current);
+      popupPollTimerRef.current = null;
+    }
+    if (popupCloseGraceTimerRef.current !== null) {
+      window.clearTimeout(popupCloseGraceTimerRef.current);
+      popupCloseGraceTimerRef.current = null;
+    }
+    if (oauthTimeoutRef.current !== null) {
+      window.clearTimeout(oauthTimeoutRef.current);
+      oauthTimeoutRef.current = null;
+    }
+  };
+
   // Listen for Google OAuth Popup Completion Message
   useEffect(() => {
     const trustedOrigins = new Set<string>([window.location.origin]);
@@ -100,36 +135,54 @@ export function AuthFormPanel({
     if (metaEnv?.DEV) {
       trustedOrigins.add("http://localhost:5000");
       trustedOrigins.add("http://127.0.0.1:5000");
+      trustedOrigins.add("http://localhost:5173");
+      trustedOrigins.add("http://localhost:5174");
     }
 
-    const clearPopupPoll = () => {
-      if (popupPollTimerRef.current !== null) {
-        window.clearInterval(popupPollTimerRef.current);
-        popupPollTimerRef.current = null;
-      }
+    const isTrustedOrigin = (origin: string) => {
+      if (trustedOrigins.has(origin)) return true;
+      return Boolean(metaEnv?.DEV && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin));
     };
 
     const handleOAuthMessage = async (event: MessageEvent) => {
-      if (!trustedOrigins.has(event.origin)) return;
+      if (!isTrustedOrigin(event.origin)) return;
       if (!oauthPopupRef.current || event.source !== oauthPopupRef.current) return;
       if (!event.data || typeof event.data !== "object") return;
+
       if (event.data.type === "ALGOLENS_OAUTH_SUCCESS") {
-        clearPopupPoll();
+        oauthOutcomeRef.current = "success";
+        clearOAuthTimers();
         oauthPopupRef.current = null;
         setGooglePending(false);
-        await completeAuthAndResume();
-        if (onSuccessRedirect) onSuccessRedirect();
+        try {
+          const ok = await completeAuthAndResume();
+          if (ok && onSuccessRedirect) {
+            onSuccessRedirect();
+          }
+        } catch (err: unknown) {
+          setValidationError(
+            err instanceof Error
+              ? err.message
+              : "Could not complete Google Sign-In session. Please try again."
+          );
+        }
       } else if (event.data.type === "ALGOLENS_OAUTH_ERROR") {
-        clearPopupPoll();
+        oauthOutcomeRef.current = "error";
+        clearOAuthTimers();
         oauthPopupRef.current = null;
         setGooglePending(false);
-        setValidationError(event.data.message || "Google Sign-In failed.");
+        setValidationError(
+          mapOAuthErrorMessage(
+            typeof event.data.errorCode === "string" ? event.data.errorCode : undefined,
+            typeof event.data.message === "string" ? event.data.message : undefined
+          )
+        );
       }
     };
 
     window.addEventListener("message", handleOAuthMessage);
     return () => {
-      clearPopupPoll();
+      clearOAuthTimers();
       window.removeEventListener("message", handleOAuthMessage);
     };
   }, [completeAuthAndResume, onSuccessRedirect]);
@@ -144,25 +197,39 @@ export function AuthFormPanel({
   const handleGoogleContinue = () => {
     clearError();
     setValidationError("");
-    setGooglePending(true);
+    setInfoMessage("");
 
-    if (popupPollTimerRef.current !== null) {
-      window.clearInterval(popupPollTimerRef.current);
-      popupPollTimerRef.current = null;
+    if (googleEnabled === false) {
+      setValidationError(mapOAuthErrorMessage("not_configured"));
+      return;
     }
+
+    if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
+      oauthPopupRef.current.focus();
+      return;
+    }
+
+    clearOAuthTimers();
+    oauthOutcomeRef.current = "none";
+    setGooglePending(true);
 
     const width = 500;
     const height = 620;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
 
-    const popup = window.open(
-      `/api/auth/google?mode=popup&origin=${encodeURIComponent(window.location.origin)}`,
-      "AlgoLensGoogleAuth",
-      `width=${width},height=${height},left=${left},top=${top},popup=yes`
-    );
+    let popup: Window | null = null;
+    try {
+      popup = window.open(
+        `/api/auth/google?mode=popup&origin=${encodeURIComponent(window.location.origin)}`,
+        "AlgoLensGoogleAuth",
+        `width=${width},height=${height},left=${left},top=${top},popup=yes`
+      );
+    } catch {
+      popup = null;
+    }
 
-    if (!popup || popup.closed) {
+    if (!popup || popup.closed || typeof popup.closed === "undefined") {
       oauthPopupRef.current = null;
       setGooglePending(false);
       setValidationError(
@@ -172,16 +239,47 @@ export function AuthFormPanel({
     }
 
     oauthPopupRef.current = popup;
+
     popupPollTimerRef.current = window.setInterval(() => {
       if (!oauthPopupRef.current || oauthPopupRef.current.closed) {
         if (popupPollTimerRef.current !== null) {
           window.clearInterval(popupPollTimerRef.current);
           popupPollTimerRef.current = null;
         }
+        // Micro-grace period allows a final postMessage on close to settle before showing closed message
+        popupCloseGraceTimerRef.current = window.setTimeout(() => {
+          popupCloseGraceTimerRef.current = null;
+          if (oauthOutcomeRef.current === "none") {
+            oauthPopupRef.current = null;
+            setGooglePending(false);
+            if (oauthTimeoutRef.current !== null) {
+              window.clearTimeout(oauthTimeoutRef.current);
+              oauthTimeoutRef.current = null;
+            }
+            setValidationError(
+              "Google Sign-In window was closed before completing authentication. You can try again or sign in with email."
+            );
+          }
+        }, 250);
+      }
+    }, 400);
+
+    // Timeout guard so UI never stays stuck in "Waiting for Google..."
+    oauthTimeoutRef.current = window.setTimeout(() => {
+      if (oauthOutcomeRef.current === "none") {
+        clearOAuthTimers();
+        if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
+          try {
+            oauthPopupRef.current.close();
+          } catch {
+            // ignore cross-origin close error
+          }
+        }
         oauthPopupRef.current = null;
         setGooglePending(false);
+        setValidationError(mapOAuthErrorMessage("network_timeout"));
       }
-    }, 500);
+    }, 120_000);
   };
 
   // Live password strength helpers

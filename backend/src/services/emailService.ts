@@ -1,8 +1,35 @@
+import nodemailer, { type Transporter } from "nodemailer";
 import { config } from "../config/env.js";
 
 export interface EmailSendResult {
   delivered: boolean;
-  channel: "resend" | "console-fallback";
+  channel: "smtp" | "console-fallback";
+}
+
+let cachedSmtpTransporter: Transporter | null = null;
+
+function getSmtpTransporter(): Transporter | null {
+  if (!config.SMTP_HOST || !config.SMTP_USER || !config.SMTP_PASS) {
+    return null;
+  }
+  if (!cachedSmtpTransporter) {
+    const port = config.SMTP_PORT || 587;
+    const isGmail = config.SMTP_HOST.toLowerCase().includes("gmail");
+    const smtpPass = isGmail ? config.SMTP_PASS.replace(/\s+/g, "") : config.SMTP_PASS;
+    cachedSmtpTransporter = nodemailer.createTransport({
+      host: config.SMTP_HOST,
+      port,
+      secure: port === 465,
+      auth: {
+        user: config.SMTP_USER,
+        pass: smtpPass,
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000,
+    });
+  }
+  return cachedSmtpTransporter;
 }
 
 // Test-only observer caches populated strictly when NODE_ENV === "test"; never exposed over HTTP.
@@ -24,33 +51,34 @@ async function sendTransactionalEmail(params: {
   devLabel: string;
   devDetails: Record<string, string>;
 }): Promise<EmailSendResult> {
-  if (config.RESEND_API_KEY) {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: config.EMAIL_FROM,
-        to: [params.to],
-        subject: params.subject,
-        html: params.html,
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(`Resend API error (${response.status}): ${body}`);
+  if (process.env.NODE_ENV !== "test") {
+    const transporter = getSmtpTransporter();
+    if (transporter) {
+      try {
+        const sender = config.EMAIL_FROM || `AlgoLens <${config.SMTP_USER}>`;
+        await transporter.sendMail({
+          from: sender,
+          to: params.to,
+          subject: params.subject,
+          html: params.html,
+        });
+        return { delivered: true, channel: "smtp" };
+      } catch (err: any) {
+        if (!config.isProduction) {
+          console.warn(
+            `\n[AlgoLens Mail Warning] SMTP delivery failed (${err?.message || "connection error"}). ` +
+              `Verify SMTP_HOST / SMTP_USER / SMTP_PASS (for Gmail use a 16-char App Password). Falling back to console output.`
+          );
+        } else {
+          throw new Error(`SMTP email delivery failed: ${err?.message || "Unknown error"}`);
+        }
+      }
     }
-
-    return { delivered: true, channel: "resend" };
   }
 
-  if (config.isProduction && !config.RESEND_API_KEY && !config.SMTP_HOST) {
+  if (config.isProduction && !config.SMTP_HOST) {
     console.warn(
-      `[AlgoLens Auth Warning] No RESEND_API_KEY or SMTP_HOST configured in production for ${params.devLabel} to ${params.to}`
+      `[AlgoLens Auth Warning] No SMTP_HOST configured in production for ${params.devLabel} to ${params.to}`
     );
     return { delivered: false, channel: "console-fallback" };
   }

@@ -53,7 +53,7 @@ interface AuthState {
   openAuthModal: (reason?: string, mode?: "login" | "register") => void;
   closeAuthModal: () => void;
   requireAuthAction: (actionLabel: string, callback: () => void | Promise<void>) => void;
-  completeAuthAndResume: () => Promise<void>;
+  completeAuthAndResume: () => Promise<boolean>;
   fetchBookmarks: () => Promise<void>;
   toggleBookmark: (algorithmId: string) => Promise<void>;
   isBookmarked: (algorithmId: string) => boolean;
@@ -156,11 +156,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         authModalReason: null,
         pendingAction: null,
         pendingOtpEmail: null,
+        error: null,
       });
       if (actionToRun) {
-        await actionToRun();
+        try {
+          await actionToRun();
+        } catch (err) {
+          console.error("Failed to resume pending authenticated action:", err);
+        }
       }
+      return true;
     }
+    set({
+      error:
+        "Authentication succeeded, but your session cookie could not be verified. Please ensure cookies are enabled for this site.",
+    });
+    return false;
   },
 
   login: async (email, password) => {

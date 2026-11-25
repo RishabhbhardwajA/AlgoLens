@@ -5,10 +5,34 @@ export function errorHandler(err: any, _req: Request, res: Response, _next: Next
     return _next(err);
   }
 
+  if (!err) {
+    return res.status(500).json({
+      error: "InternalServerError",
+      message: "An unexpected error occurred. Please try again later.",
+    });
+  }
+
+  if (err.type === "entity.too.large" || err.status === 413) {
+    return res.status(413).json({
+      error: "PayloadTooLarge",
+      message: "Request payload exceeds the maximum permitted server size (256 KB).",
+    });
+  }
+
   if (err instanceof SyntaxError && "body" in err) {
     return res.status(400).json({
       error: "Bad Request",
       message: "Malformed JSON payload in request body.",
+    });
+  }
+
+  if (
+    err.code === "SQLITE_BUSY" ||
+    (typeof err.message === "string" && err.message.includes("database is locked"))
+  ) {
+    return res.status(503).json({
+      error: "ServiceUnavailable",
+      message: "The server is experiencing high load. Please retry in a few seconds.",
     });
   }
 

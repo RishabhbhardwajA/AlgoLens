@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -14,9 +13,8 @@ import { securityHeaders, sanitizeBody } from "./middleware/security.js";
 import { requestLogger } from "./middleware/logger.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
-dotenv.config();
-
 export const app = express();
+app.disable("x-powered-by");
 
 // Security and Logging
 app.use(securityHeaders);
@@ -27,6 +25,8 @@ const allowedOrigins = Array.from(
   new Set([
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
     "http://localhost:3000",
     config.CLIENT_URL,
   ])
@@ -34,14 +34,21 @@ const allowedOrigins = Array.from(
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (!config.isProduction && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
 
-// Body Parsing & Sanitization
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+// Bounded Body Parsing & Sanitization (256kb ceiling prevents large JSON memory spikes)
+app.use(express.json({ limit: "256kb" }));
+app.use(express.urlencoded({ extended: true, limit: "256kb" }));
 app.use(sanitizeBody);
 
 // Passport Auth

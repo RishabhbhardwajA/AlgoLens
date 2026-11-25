@@ -14,10 +14,12 @@ const OTP_MAX_ATTEMPTS = 5;
 
 export class AuthServiceError extends Error {
   statusCode: number;
-  constructor(message: string, statusCode = 400) {
+  code?: string;
+  constructor(message: string, statusCode = 400, code?: string) {
     super(message);
     this.name = "AuthServiceError";
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -241,50 +243,146 @@ export const authService = {
    */
   async authenticateWithGoogleCode(code: string): Promise<{ token: string; user: SanitizedUser }> {
     if (!config.GOOGLE_CLIENT_ID || !config.GOOGLE_CLIENT_SECRET) {
-      throw new AuthServiceError("Google Sign-In is not configured on this server.", 503);
+      throw new AuthServiceError(
+        "Google Sign-In is not configured on this server.",
+        503,
+        "not_configured"
+      );
     }
 
-    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: config.GOOGLE_CLIENT_ID,
-        client_secret: config.GOOGLE_CLIENT_SECRET,
-        redirect_uri: config.GOOGLE_REDIRECT_URI,
-        grant_type: "authorization_code",
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
+    let tokenRes: globalThis.Response;
+    try {
+      tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id: config.GOOGLE_CLIENT_ID,
+          client_secret: config.GOOGLE_CLIENT_SECRET,
+          redirect_uri: config.GOOGLE_REDIRECT_URI,
+          grant_type: "authorization_code",
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+      console.error("[Google OAuth Token Fetch Error]:", err?.message || err);
+      throw new AuthServiceError(
+        isTimeout
+          ? "Google authentication timed out. Please try signing in again."
+          : "Unable to reach Google authentication servers. Please check your internet connection.",
+        isTimeout ? 504 : 502,
+        isTimeout ? "network_timeout" : "network_error"
+      );
+    }
 
     if (!tokenRes.ok) {
-      throw new AuthServiceError("Failed to exchange Google OAuth authorization code.", 401);
+      const tokenErr = (await tokenRes.json().catch(() => null)) as {
+        error?: string;
+        error_description?: string;
+      } | null;
+      const errCode = tokenErr?.error || "token_exchange_failed";
+      console.error(
+        `[Google OAuth Token Exchange Failed] status=${tokenRes.status} error=${errCode} desc=${tokenErr?.error_description || ""}`
+      );
+
+      if (errCode === "redirect_uri_mismatch") {
+        throw new AuthServiceError(
+          "Google OAuth configuration error: Redirect URI mismatch. Ensure GOOGLE_REDIRECT_URI matches Google Cloud Console.",
+          500,
+          "redirect_uri_mismatch"
+        );
+      }
+      if (errCode === "invalid_client" || errCode === "unauthorized_client") {
+        throw new AuthServiceError(
+          "Google OAuth configuration error: Invalid OAuth client credentials on server.",
+          500,
+          "invalid_client"
+        );
+      }
+      if (errCode === "invalid_grant") {
+        throw new AuthServiceError(
+          "Google sign-in authorization expired or was already used. Please try again.",
+          401,
+          "invalid_grant"
+        );
+      }
+
+      throw new AuthServiceError(
+        "Failed to verify authorization with Google. Please try again.",
+        401,
+        "token_exchange_failed"
+      );
     }
 
-    const tokenData = (await tokenRes.json()) as { access_token?: string };
+    let tokenData: { access_token?: string };
+    try {
+      tokenData = (await tokenRes.json()) as { access_token?: string };
+    } catch {
+      throw new AuthServiceError(
+        "Received an invalid token response from Google. Please try again.",
+        502,
+        "invalid_provider_response"
+      );
+    }
+
     if (!tokenData.access_token) {
-      throw new AuthServiceError("Google OAuth did not issue an access token.", 401);
+      throw new AuthServiceError(
+        "Google OAuth did not issue an access token. Please try again.",
+        401,
+        "token_exchange_failed"
+      );
     }
 
-    const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
-      signal: AbortSignal.timeout(8000),
-    });
+    let profileRes: globalThis.Response;
+    try {
+      profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+      console.error("[Google UserInfo Fetch Error]:", err?.message || err);
+      throw new AuthServiceError(
+        isTimeout
+          ? "Timed out fetching your Google profile. Please try again."
+          : "Unable to fetch your Google profile due to a network error.",
+        isTimeout ? 504 : 502,
+        isTimeout ? "network_timeout" : "network_error"
+      );
+    }
 
     if (!profileRes.ok) {
-      throw new AuthServiceError("Failed to retrieve verified Google profile.", 401);
+      throw new AuthServiceError(
+        "Failed to retrieve your verified Google profile.",
+        401,
+        "profile_fetch_failed"
+      );
     }
 
-    const profile = (await profileRes.json()) as {
+    let profile: {
       sub?: string;
       email?: string;
       email_verified?: boolean;
       name?: string;
       picture?: string;
     };
+    try {
+      profile = (await profileRes.json()) as typeof profile;
+    } catch {
+      throw new AuthServiceError(
+        "Received an invalid profile payload from Google.",
+        502,
+        "invalid_provider_response"
+      );
+    }
 
     if (!profile.sub || !profile.email || profile.email_verified !== true) {
-      throw new AuthServiceError("Google account does not have a verified email address.", 403);
+      throw new AuthServiceError(
+        "Your Google account does not have a verified email address.",
+        403,
+        "email_unverified"
+      );
     }
 
     return this.findOrLinkGoogleAccount({
@@ -310,6 +408,13 @@ export const authService = {
     let existing = userRepository.findUserByGoogleId(params.googleId);
     if (!existing) {
       existing = userRepository.findUserByEmail(cleanEmail);
+      if (existing?.google_id && existing.google_id !== params.googleId) {
+        throw new AuthServiceError(
+          "This email address is already linked to a different Google account.",
+          409,
+          "account_conflict"
+        );
+      }
     }
 
     let finalRecord;
@@ -328,7 +433,11 @@ export const authService = {
     }
 
     if (!finalRecord) {
-      throw new AuthServiceError("Unable to create or link Google account.", 500);
+      throw new AuthServiceError(
+        "Unable to create or link Google account.",
+        500,
+        "account_link_failed"
+      );
     }
 
     const sanitized = sanitizeUser(finalRecord);
