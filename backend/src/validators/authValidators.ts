@@ -30,7 +30,7 @@ export function createValidator(
 
 export const validateRegister = createValidator((req: Request) => {
   const errors: ValidationErrorDetail[] = [];
-  const { name, email, password } = req.body;
+  const { name, email, password, confirmPassword } = req.body;
 
   if (!name || typeof name !== "string" || name.trim().length < 2) {
     errors.push({ field: "name", message: "Name must be at least 2 characters long." });
@@ -57,6 +57,36 @@ export const validateRegister = createValidator((req: Request) => {
     }
   }
 
+  if (confirmPassword === undefined || typeof confirmPassword !== "string" || confirmPassword !== password) {
+    errors.push({ field: "confirmPassword", message: "Passwords do not match." });
+  }
+
+  return errors;
+});
+
+export const validateVerifyOtp = createValidator((req: Request) => {
+  const errors: ValidationErrorDetail[] = [];
+  const { email, otp } = req.body;
+
+  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
+    errors.push({ field: "email", message: "Please provide a valid email address." });
+  }
+
+  if (!otp || typeof otp !== "string" || !/^\d{6}$/.test(otp.trim())) {
+    errors.push({ field: "otp", message: "Please enter the valid 6-digit verification code." });
+  }
+
+  return errors;
+});
+
+export const validateResendOtp = createValidator((req: Request) => {
+  const errors: ValidationErrorDetail[] = [];
+  const { email } = req.body;
+
+  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
+    errors.push({ field: "email", message: "Please provide a valid email address." });
+  }
+
   return errors;
 });
 
@@ -66,12 +96,14 @@ export const validateLogin = createValidator((req: Request) => {
 
   if (!email || typeof email !== "string" || !email.trim()) {
     errors.push({ field: "email", message: "Email address is required." });
-  } else if (!EMAIL_REGEX.test(email.trim())) {
+  } else if (email.trim().length > 254 || !EMAIL_REGEX.test(email.trim())) {
     errors.push({ field: "email", message: "Please provide a valid email address." });
   }
 
   if (!password || typeof password !== "string" || !password) {
     errors.push({ field: "password", message: "Password is required." });
+  } else if (password.length > 128) {
+    errors.push({ field: "password", message: "Password cannot exceed 128 characters." });
   }
 
   return errors;
@@ -89,13 +121,21 @@ export const validateProfileUpdate = createValidator((req: Request) => {
     }
   }
 
-  if (bio !== undefined && typeof bio === "string" && bio.length > 300) {
-    errors.push({ field: "bio", message: "Bio cannot exceed 300 characters." });
+  if (bio !== undefined) {
+    if (typeof bio !== "string") {
+      errors.push({ field: "bio", message: "Bio must be a string." });
+    } else if (bio.length > 300) {
+      errors.push({ field: "bio", message: "Bio cannot exceed 300 characters." });
+    }
   }
 
-  if (avatar_url !== undefined && avatar_url !== "" && typeof avatar_url === "string") {
-    if (!URL_REGEX.test(avatar_url.trim())) {
-      errors.push({ field: "avatar_url", message: "Avatar must be a valid HTTP or HTTPS image URL." });
+  if (avatar_url !== undefined) {
+    if (typeof avatar_url !== "string") {
+      errors.push({ field: "avatar_url", message: "Avatar URL must be a string." });
+    } else if (avatar_url !== "") {
+      if (avatar_url.length > 500 || !URL_REGEX.test(avatar_url.trim())) {
+        errors.push({ field: "avatar_url", message: "Avatar must be a valid HTTP or HTTPS image URL." });
+      }
     }
   }
 
@@ -106,7 +146,7 @@ export const validateChangePassword = createValidator((req: Request) => {
   const errors: ValidationErrorDetail[] = [];
   const { currentPassword, newPassword } = req.body;
 
-  if (!currentPassword || typeof currentPassword !== "string") {
+  if (!currentPassword || typeof currentPassword !== "string" || currentPassword.length > 128) {
     errors.push({ field: "currentPassword", message: "Current password is required." });
   }
 
@@ -115,6 +155,8 @@ export const validateChangePassword = createValidator((req: Request) => {
   } else {
     if (newPassword.length < 8) {
       errors.push({ field: "newPassword", message: "New password must be at least 8 characters long." });
+    } else if (newPassword.length > 128) {
+      errors.push({ field: "newPassword", message: "New password cannot exceed 128 characters." });
     } else if (newPassword === currentPassword) {
       errors.push({ field: "newPassword", message: "New password cannot be the same as the current password." });
     } else if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
@@ -129,7 +171,7 @@ export const validateForgotPassword = createValidator((req: Request) => {
   const errors: ValidationErrorDetail[] = [];
   const { email } = req.body;
 
-  if (!email || typeof email !== "string" || !EMAIL_REGEX.test(email.trim())) {
+  if (!email || typeof email !== "string" || email.trim().length > 254 || !EMAIL_REGEX.test(email.trim())) {
     errors.push({ field: "email", message: "A valid email address is required." });
   }
 
@@ -140,12 +182,14 @@ export const validateResetPassword = createValidator((req: Request) => {
   const errors: ValidationErrorDetail[] = [];
   const { token, newPassword } = req.body;
 
-  if (!token || typeof token !== "string" || token.trim().length === 0) {
+  if (!token || typeof token !== "string" || token.trim().length === 0 || token.trim().length > 256) {
     errors.push({ field: "token", message: "Password reset token is required." });
   }
 
   if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
     errors.push({ field: "newPassword", message: "New password must be at least 8 characters long." });
+  } else if (newPassword.length > 128) {
+    errors.push({ field: "newPassword", message: "New password cannot exceed 128 characters." });
   } else if (!/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
     errors.push({ field: "newPassword", message: "New password must contain at least one letter and one number." });
   }

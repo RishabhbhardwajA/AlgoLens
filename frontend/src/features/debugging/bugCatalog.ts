@@ -1,5 +1,6 @@
 import { step, frame, resetStepCounter } from "@/engine/stepBuilder";
-import type { ExecutionStep, VisualizationState, ArrayElement } from "@/engine/executionTypes";
+import type { ExecutionStep, VisualizationState } from "@/engine/executionTypes";
+import { buildArrayVisualizationState } from "@/utils/arrayVisualizerHelper";
 
 export interface BugExample {
   id: string;
@@ -29,32 +30,11 @@ function buildArrayState(
   mid: number | null,
   found: number | null
 ): VisualizationState {
-  const elements: ArrayElement[] = arr.map((value, index) => {
-    let state: ArrayElement["state"] = "default";
-    if (found !== null && index === found) state = "found";
-    else if (index < left || index > right) state = "eliminated";
-    else if (mid !== null && index === mid) state = "current";
-    else if (index === left) state = "pointer-left";
-    else if (index === right) state = "pointer-right";
-
-    return {
-      value,
-      index,
-      state,
-      label:
-        found !== null && index === found
-          ? "✓"
-          : index === left && mid !== left
-          ? "L"
-          : index === right && mid !== right
-          ? "R"
-          : mid !== null && index === mid
-          ? "mid"
-          : undefined,
-    };
-  });
-
-  return { type: "array", elements, pointers: { left, right, ...(mid !== null ? { mid } : {}) } };
+  return buildArrayVisualizationState(
+    arr,
+    { left, right, ...(mid !== null ? { mid } : {}) },
+    { foundIndex: found, useElimination: true, shortLabels: true }
+  );
 }
 
 export const BUG_CATALOG: BugExample[] = [

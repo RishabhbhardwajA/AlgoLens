@@ -76,4 +76,66 @@ export const userController = {
     }
     return res.json({ success: true, message: "Snippet deleted successfully." });
   },
+
+  recordChallengeAttempt(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const { algorithmId, stepIndex, challengeType, selectedOption, correctOption, isCorrect, xpEarned } = req.body;
+    const attempt = userService.recordChallengeAttempt(authReq.user!.id, {
+      algorithmId: sanitizeString(algorithmId),
+      stepIndex,
+      challengeType: sanitizeString(challengeType),
+      selectedOption: sanitizeString(selectedOption),
+      correctOption: sanitizeString(correctOption),
+      isCorrect: Boolean(isCorrect),
+      xpEarned: typeof xpEarned === "number" ? Math.max(0, xpEarned) : 0,
+    });
+    const stats = userService.getChallengeStats(authReq.user!.id);
+    return res.status(201).json({ success: true, attempt, stats });
+  },
+
+  getChallengeStats(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const stats = userService.getChallengeStats(authReq.user!.id);
+    return res.json({ success: true, stats });
+  },
+
+  getWeakTopics(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const weakTopics = userService.getWeakTopicsAnalytics(authReq.user!.id);
+    return res.json({ success: true, weakTopics });
+  },
+
+  getTraceBookmarks(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const traceBookmarks = userService.getTraceBookmarks(authReq.user!.id);
+    return res.json({ success: true, traceBookmarks });
+  },
+
+  addTraceBookmark(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const { algorithmId, stepIndex, stepSnapshot, note } = req.body;
+    const serializedSnapshot =
+      typeof stepSnapshot === "string" ? stepSnapshot : JSON.stringify(stepSnapshot);
+    const bookmark = userService.addTraceBookmark(authReq.user!.id, {
+      algorithmId: sanitizeString(algorithmId),
+      stepIndex,
+      stepSnapshot: serializedSnapshot.slice(0, 20000),
+      note: note ? sanitizeString(note) : "",
+    });
+    return res.status(201).json({ success: true, bookmark });
+  },
+
+  removeTraceBookmark(req: Request, res: Response) {
+    const authReq = req as AuthenticatedRequest;
+    const rawId = req.params.id;
+    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+    if (!id) {
+      return res.status(400).json({ error: "Validation Error", message: "Bookmark ID is required." });
+    }
+    const deleted = userService.removeTraceBookmark(authReq.user!.id, id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Not Found", message: "Trace bookmark not found." });
+    }
+    return res.json({ success: true, message: "Trace bookmark removed." });
+  },
 };

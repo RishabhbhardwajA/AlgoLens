@@ -19,7 +19,7 @@ import java.util.*;
  */
 public class JavaTracer {
     private static final int DEFAULT_MAX_STEPS = 500;
-    private static final int HARD_MAX_STEPS = 500;
+    private static final int HARD_MAX_STEPS = 2000;
     private static final int MAX_COLLECTION_ELEMENTS = 50;
     private static final int MAX_STRING_LENGTH = 256;
     private static final int MAX_STACK_DEPTH = 15;
@@ -199,16 +199,22 @@ public class JavaTracer {
                     fMap.put("functionName", fLoc.method().name());
                     fMap.put("fileName", fLoc.sourceName());
                     fMap.put("line", fLoc.lineNumber());
-                    framesList.add(fMap);
-                }
-            }
 
-            if (!frames.isEmpty()) {
-                StackFrame top = frames.get(0);
-                List<LocalVariable> visible = top.visibleVariables();
-                for (LocalVariable var : visible) {
-                    Value val = top.getValue(var);
-                    variablesMap.put(var.name(), serializeValue(var.name(), var.typeName(), val, 0));
+                    Map<String, Object> frameVars = new LinkedHashMap<>();
+                    try {
+                        List<LocalVariable> visible = f.visibleVariables();
+                        for (LocalVariable var : visible) {
+                            Value val = f.getValue(var);
+                            frameVars.put(var.name(), serializeValue(var.name(), var.typeName(), val, 0));
+                        }
+                    } catch (Exception ignored) {}
+
+                    fMap.put("localVariables", frameVars);
+                    framesList.add(fMap);
+
+                    if (framesList.size() == 1) {
+                        variablesMap = frameVars;
+                    }
                 }
             }
         } catch (Exception ignored) {}

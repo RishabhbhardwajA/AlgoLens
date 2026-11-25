@@ -9,6 +9,8 @@ export interface User {
   bio: string;
   avatar_url: string;
   role: string;
+  is_email_verified?: boolean;
+  auth_provider?: "local" | "google" | "both";
   created_at: string;
   updated_at: string;
 }
@@ -23,10 +25,11 @@ export interface UserStats {
 export interface AuthResponse {
   success: boolean;
   message?: string;
-  token?: string;
+  requiresOtp?: boolean;
+  email?: string;
+  cooldownSeconds?: number;
   user?: User;
   stats?: UserStats;
-  demoResetToken?: string;
 }
 
 export interface ProgressItem {
@@ -50,20 +53,55 @@ export interface SnippetItem {
   updated_at: string;
 }
 
-function getAuthHeader(): Record<string, string> {
-  const token = localStorage.getItem("algolens_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
+export interface ChallengeAttemptItem {
+  id: string;
+  user_id: string;
+  algorithm_id: string;
+  step_index: number;
+  challenge_type: string;
+  selected_option: string;
+  correct_option: string;
+  is_correct: number;
+  xp_earned: number;
+  created_at: string;
+}
+
+export interface ChallengeStatsData {
+  totalAttempts: number;
+  totalCorrect: number;
+  accuracyPercent: number;
+  totalXp: number;
+  recentAttempts: ChallengeAttemptItem[];
+}
+
+export interface BookmarkedTraceItem {
+  id: string;
+  user_id: string;
+  algorithm_id: string;
+  step_index: number;
+  step_snapshot: string;
+  note: string;
+  created_at: string;
+}
+
+export interface WeakTopicItem {
+  topic: string;
+  algorithmId: string;
+  attempts: number;
+  mistakes: number;
+  accuracyPercent: number;
+  recommendation: string;
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers = {
     "Content-Type": "application/json",
-    ...getAuthHeader(),
     ...(options.headers || {}),
   };
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
+    credentials: "include",
     headers,
   });
 
@@ -80,10 +118,29 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const authApi = {
-  async register(name: string, email: string, password: string): Promise<AuthResponse> {
+  async register(
+    name: string,
+    email: string,
+    password: string,
+    confirmPassword: string
+  ): Promise<AuthResponse> {
     return request<AuthResponse>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, confirmPassword }),
+    });
+  },
+
+  async verifyOtp(email: string, otp: string): Promise<AuthResponse> {
+    return request<AuthResponse>("/auth/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ email, otp }),
+    });
+  },
+
+  async resendOtp(email: string): Promise<{ success: boolean; cooldownSeconds: number; message: string }> {
+    return request<{ success: boolean; cooldownSeconds: number; message: string }>("/auth/resend-otp", {
+      method: "POST",
+      body: JSON.stringify({ email }),
     });
   },
 
@@ -91,6 +148,12 @@ export const authApi = {
     return request<AuthResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
+    });
+  },
+
+  async logout(): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>("/auth/logout", {
+      method: "POST",
     });
   },
 
@@ -112,8 +175,8 @@ export const authApi = {
     });
   },
 
-  async forgotPassword(email: string): Promise<{ success: boolean; message: string; demoResetToken?: string }> {
-    return request<{ success: boolean; message: string; demoResetToken?: string }>("/auth/forgot-password", {
+  async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>("/auth/forgot-password", {
       method: "POST",
       body: JSON.stringify({ email }),
     });
@@ -177,6 +240,54 @@ export const userApi = {
 
   async deleteSnippet(id: string): Promise<{ success: boolean; message: string }> {
     return request<{ success: boolean; message: string }>(`/user/snippets/${id}`, {
+      method: "DELETE",
+    });
+  },
+
+  async recordChallengeAttempt(data: {
+    algorithmId: string;
+    stepIndex: number;
+    challengeType: string;
+    selectedOption: string;
+    correctOption: string;
+    isCorrect: boolean;
+    xpEarned: number;
+  }): Promise<{ success: boolean; attempt: ChallengeAttemptItem; stats: ChallengeStatsData }> {
+    return request<{ success: boolean; attempt: ChallengeAttemptItem; stats: ChallengeStatsData }>(
+      "/user/challenges/attempt",
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
+  },
+
+  async getChallengeStats(): Promise<{ success: boolean; stats: ChallengeStatsData }> {
+    return request<{ success: boolean; stats: ChallengeStatsData }>("/user/challenges/stats");
+  },
+
+  async getWeakTopics(): Promise<{ success: boolean; weakTopics: WeakTopicItem[] }> {
+    return request<{ success: boolean; weakTopics: WeakTopicItem[] }>("/user/analytics/weak-topics");
+  },
+
+  async getTraceBookmarks(): Promise<{ success: boolean; traceBookmarks: BookmarkedTraceItem[] }> {
+    return request<{ success: boolean; traceBookmarks: BookmarkedTraceItem[] }>("/user/traces/bookmarks");
+  },
+
+  async addTraceBookmark(data: {
+    algorithmId: string;
+    stepIndex: number;
+    stepSnapshot: unknown;
+    note?: string;
+  }): Promise<{ success: boolean; bookmark: BookmarkedTraceItem }> {
+    return request<{ success: boolean; bookmark: BookmarkedTraceItem }>("/user/traces/bookmarks", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  async removeTraceBookmark(id: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>(`/user/traces/bookmarks/${id}`, {
       method: "DELETE",
     });
   },

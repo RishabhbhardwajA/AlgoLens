@@ -19,6 +19,7 @@ export interface AppConfig {
   isProduction: boolean;
   JWT_SECRET: string;
   CLIENT_URL: string;
+  PUBLIC_APP_URL: string;
   DATABASE_PATH?: string;
   JUDGE0_API_URL?: string;
   JUDGE0_API_KEY?: string;
@@ -27,6 +28,17 @@ export interface AppConfig {
   ENABLE_JAVA_TRACING: boolean;
   JAVA_TRACE_WORKER_URL?: string;
   EXECUTION_ROLE: "api" | "worker";
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: number;
+  SMTP_USER?: string;
+  SMTP_PASS?: string;
 }
 
 /**
@@ -38,6 +50,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
   const isProduction = nodeEnv === "production";
   const port = parseInt(env.PORT || "5000", 10);
   const clientUrl = env.CLIENT_URL || "http://localhost:5173";
+  const publicAppUrl = (env.PUBLIC_APP_URL?.trim() || clientUrl).replace(/\/+$/, "");
   const databasePath = env.DATABASE_PATH;
 
   const rawSecret = env.JWT_SECRET?.trim();
@@ -96,6 +109,20 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
 
   const enableJavaTracing = env.ENABLE_JAVA_TRACING === "true";
   const javaTraceWorkerUrl = env.JAVA_TRACE_WORKER_URL?.trim();
+  const geminiApiKey = executionRole !== "worker" ? env.GEMINI_API_KEY?.trim() : undefined;
+  const geminiModel = env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+
+  const googleClientId = executionRole !== "worker" ? env.GOOGLE_CLIENT_ID?.trim() : undefined;
+  const googleClientSecret = executionRole !== "worker" ? env.GOOGLE_CLIENT_SECRET?.trim() : undefined;
+  const googleRedirectUri =
+    env.GOOGLE_REDIRECT_URI?.trim() || `http://localhost:${isNaN(port) ? 5000 : port}/api/auth/google/callback`;
+
+  const resendApiKey = executionRole !== "worker" ? env.RESEND_API_KEY?.trim() : undefined;
+  const emailFrom = env.EMAIL_FROM?.trim() || "AlgoLens <noreply@algolens.dev>";
+  const smtpHost = executionRole !== "worker" ? env.SMTP_HOST?.trim() : undefined;
+  const smtpPort = env.SMTP_PORT ? parseInt(env.SMTP_PORT, 10) : 587;
+  const smtpUser = executionRole !== "worker" ? env.SMTP_USER?.trim() : undefined;
+  const smtpPass = executionRole !== "worker" ? env.SMTP_PASS?.trim() : undefined;
 
   return {
     PORT: isNaN(port) ? 5000 : port,
@@ -103,6 +130,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     isProduction,
     JWT_SECRET: jwtSecret,
     CLIENT_URL: clientUrl,
+    PUBLIC_APP_URL: publicAppUrl,
     DATABASE_PATH: databasePath,
     JUDGE0_API_URL: judge0Url,
     JUDGE0_API_KEY: judge0Key,
@@ -111,6 +139,17 @@ export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): AppCo
     ENABLE_JAVA_TRACING: enableJavaTracing,
     JAVA_TRACE_WORKER_URL: javaTraceWorkerUrl,
     EXECUTION_ROLE: executionRole,
+    GEMINI_API_KEY: geminiApiKey,
+    GEMINI_MODEL: geminiModel,
+    GOOGLE_CLIENT_ID: googleClientId,
+    GOOGLE_CLIENT_SECRET: googleClientSecret,
+    GOOGLE_REDIRECT_URI: googleRedirectUri,
+    RESEND_API_KEY: resendApiKey,
+    EMAIL_FROM: emailFrom,
+    SMTP_HOST: smtpHost,
+    SMTP_PORT: isNaN(smtpPort) ? 587 : smtpPort,
+    SMTP_USER: smtpUser,
+    SMTP_PASS: smtpPass,
   };
 }
 

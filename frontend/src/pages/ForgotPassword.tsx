@@ -1,14 +1,22 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { authApi } from "@/services/api";
-import { Activity, Mail, Lock, KeyRound, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Logo } from "@/components/common/Logo";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { Mail, Lock, KeyRound, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function ForgotPassword() {
+  useDocumentMeta({
+    title: "Reset Password | AlgoLens",
+    description: "Reset your AlgoLens password using your registered email token.",
+    canonicalPath: "/forgot-password",
+    noIndex: true,
+  });
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [step, setStep] = useState<"request" | "reset">("request");
-  const [demoToken, setDemoToken] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,10 +36,6 @@ export default function ForgotPassword() {
     try {
       const res = await authApi.forgotPassword(email.trim());
       setSuccessMessage(res.message);
-      if (res.demoResetToken) {
-        setDemoToken(res.demoResetToken);
-        setToken(res.demoResetToken);
-      }
       setStep("reset");
     } catch (err: any) {
       setError(err.message || "Failed to request password reset.");
@@ -49,8 +53,12 @@ export default function ForgotPassword() {
       setError("Please enter the reset token.");
       return;
     }
-    if (newPassword.length < 8) {
-      setError("New password must be at least 8 characters.");
+    if (newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setError("New password must be at least 8 characters and include both letters and numbers.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError("New passwords do not match.");
       return;
     }
 
@@ -59,9 +67,9 @@ export default function ForgotPassword() {
       const res = await authApi.resetPassword(token.trim(), newPassword);
       setSuccessMessage(res.message);
       setStep("request");
-      setDemoToken(null);
       setToken("");
       setNewPassword("");
+      setConfirmNewPassword("");
     } catch (err: any) {
       setError(err.message || "Failed to reset password.");
     } finally {
@@ -73,29 +81,19 @@ export default function ForgotPassword() {
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12 relative overflow-hidden">
       <div className="relative z-10 w-full max-w-md">
         <div
-          className="rounded-2xl p-8 backdrop-blur-xl"
+          className="rounded-3xl p-8 backdrop-blur-2xl"
           style={{
-            background: "rgba(255, 255, 255, 0.92)",
-            border: "1px solid rgba(226, 232, 240, 0.8)",
-            boxShadow: "0 10px 40px -10px rgba(99, 102, 241, 0.1), 0 1px 3px rgba(15, 23, 42, 0.05)",
+            background: "rgba(255, 255, 255, 0.76)",
+            border: "1px solid rgba(255, 255, 255, 0.94)",
+            boxShadow:
+              "0 0 0 1px rgba(99, 102, 241, 0.08), 0 18px 48px -10px rgba(99, 102, 241, 0.14), 0 2px 8px rgba(15, 23, 42, 0.04)",
           }}
         >
           {/* Logo */}
           <div className="text-center mb-6">
-            <Link to="/" className="inline-flex items-center gap-2 mb-3 group cursor-pointer">
-              <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{
-                  background: "linear-gradient(135deg, #6366F1, #38BDF8)",
-                  boxShadow: "0 4px 12px rgba(99, 102, 241, 0.35)",
-                }}
-              >
-                <Activity className="w-5 h-5 text-white" />
-              </div>
-              <span className="text-2xl font-bold tracking-tight text-slate-900 font-sans">
-                AlgoLens
-              </span>
-            </Link>
+            <div className="flex justify-center mb-3">
+              <Logo linkHome variant="full" size="md" tone="light" showSubtitle />
+            </div>
             <h1 className="text-xl font-bold text-slate-900">Reset Password</h1>
             <p className="text-sm text-slate-500 mt-1">
               {step === "request"
@@ -107,7 +105,7 @@ export default function ForgotPassword() {
           {/* Success / Error Messages */}
           {error && (
             <div
-              className="flex items-start gap-2.5 p-3.5 rounded-xl mb-4 text-sm"
+              className="flex items-start gap-2.5 p-3.5 rounded-2xl mb-4 text-sm backdrop-blur-sm"
               style={{
                 background: "rgba(239, 68, 68, 0.08)",
                 border: "1px solid rgba(239, 68, 68, 0.2)",
@@ -121,7 +119,7 @@ export default function ForgotPassword() {
 
           {successMessage && (
             <div
-              className="flex items-start gap-2.5 p-3.5 rounded-xl mb-4 text-sm"
+              className="flex items-start gap-2.5 p-3.5 rounded-2xl mb-4 text-sm backdrop-blur-sm"
               style={{
                 background: "rgba(16, 185, 129, 0.08)",
                 border: "1px solid rgba(16, 185, 129, 0.2)",
@@ -133,13 +131,12 @@ export default function ForgotPassword() {
             </div>
           )}
 
-          {demoToken && step === "reset" && (
-            <div className="p-3 mb-4 rounded-xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-              <span className="font-semibold">Demo token generated:</span>
-              <p className="font-mono text-[11px] break-all mt-1 bg-white p-1.5 rounded border border-indigo-100">
-                {demoToken}
+          {step === "reset" && (
+            <div className="p-3.5 mb-4 rounded-2xl bg-indigo-50/80 border border-indigo-200/80 text-xs text-indigo-900 backdrop-blur-sm">
+              <p className="font-semibold">Check your email for your reset token</p>
+              <p className="mt-1 text-[11px] text-indigo-700">
+                Paste the reset token sent to your inbox (or printed in the backend server console during local development).
               </p>
-              <p className="mt-1 text-[11px] text-indigo-700">Token has been auto-filled into the field below.</p>
             </div>
           )}
 
@@ -156,7 +153,7 @@ export default function ForgotPassword() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="student@university.edu"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                    className="w-full pl-10 pr-4 py-2.5 glass-input rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none"
                     required
                   />
                 </div>
@@ -165,10 +162,10 @@ export default function ForgotPassword() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 px-4 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
+                className="w-full py-2.5 px-4 rounded-full font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
                 style={{
-                  background: "linear-gradient(135deg, #6366F1, #4F46E5)",
-                  boxShadow: "0 4px 14px rgba(99, 102, 241, 0.3)",
+                  background: "linear-gradient(135deg, #4648D4, #6366F1)",
+                  boxShadow: "0 6px 18px rgba(70, 72, 212, 0.3)",
                 }}
               >
                 {isLoading ? "Generating Token..." : "Send Reset Token"}
@@ -188,7 +185,7 @@ export default function ForgotPassword() {
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
                     placeholder="Enter reset token"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                    className="w-full pl-10 pr-4 py-2.5 glass-input rounded-xl text-sm text-slate-900 font-mono placeholder-slate-400 focus:outline-none"
                     required
                   />
                 </div>
@@ -199,13 +196,30 @@ export default function ForgotPassword() {
                   New Password
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
                   <input
                     type="password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 8 characters"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+                    placeholder="Min 8 chars, letters + numbers"
+                    className="w-full pl-10 pr-4 py-2.5 glass-input rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    className="w-full pl-10 pr-4 py-2.5 glass-input rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                     required
                   />
                 </div>
@@ -214,18 +228,22 @@ export default function ForgotPassword() {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setStep("request")}
-                  className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all"
+                  onClick={() => {
+                    setError(null);
+                    setSuccessMessage(null);
+                    setStep("request");
+                  }}
+                  className="px-4 py-2.5 rounded-full text-xs font-medium text-slate-700 bg-white/75 hover:bg-white border border-white/90 ring-1 ring-slate-200/70 transition-all cursor-pointer"
                 >
                   Back
                 </button>
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
+                  className="flex-1 py-2.5 px-4 rounded-full font-semibold text-sm text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 cursor-pointer shadow-md"
                   style={{
-                    background: "linear-gradient(135deg, #6366F1, #4F46E5)",
-                    boxShadow: "0 4px 14px rgba(99, 102, 241, 0.3)",
+                    background: "linear-gradient(135deg, #4648D4, #6366F1)",
+                    boxShadow: "0 6px 18px rgba(70, 72, 212, 0.3)",
                   }}
                 >
                   {isLoading ? "Updating..." : "Update Password"}

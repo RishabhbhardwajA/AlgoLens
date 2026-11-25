@@ -1,5 +1,12 @@
 import { userRepository } from "../repositories/userRepository.js";
-import type { ProgressRecord, SnippetRecord } from "../types/index.js";
+import type {
+  ProgressRecord,
+  SnippetRecord,
+  ChallengeAttemptRecord,
+  ChallengeStats,
+  BookmarkedTraceRecord,
+  WeakTopicSummary,
+} from "../types/index.js";
 
 export const userService = {
   getBookmarks(userId: string): string[] {
@@ -41,5 +48,43 @@ export const userService = {
 
   deleteSnippet(userId: string, snippetId: string): boolean {
     return userRepository.deleteSnippet(userId, snippetId);
+  },
+
+  recordChallengeAttempt(
+    userId: string,
+    data: {
+      algorithmId: string;
+      stepIndex: number;
+      challengeType: string;
+      selectedOption: string;
+      correctOption: string;
+      isCorrect: boolean;
+      xpEarned: number;
+    }
+  ): ChallengeAttemptRecord {
+    return userRepository.recordChallengeAttempt(userId, data);
+  },
+
+  getChallengeStats(userId: string): ChallengeStats {
+    return userRepository.getChallengeStats(userId);
+  },
+
+  getWeakTopicsAnalytics(userId: string): WeakTopicSummary[] {
+    return userRepository.getWeakTopicsAnalytics(userId);
+  },
+
+  getTraceBookmarks(userId: string): BookmarkedTraceRecord[] {
+    return userRepository.getTraceBookmarks(userId);
+  },
+
+  addTraceBookmark(
+    userId: string,
+    data: { algorithmId: string; stepIndex: number; stepSnapshot: string; note?: string }
+  ): BookmarkedTraceRecord {
+    return userRepository.addTraceBookmark(userId, data);
+  },
+
+  removeTraceBookmark(userId: string, bookmarkId: string): boolean {
+    return userRepository.removeTraceBookmark(userId, bookmarkId);
   },
 };

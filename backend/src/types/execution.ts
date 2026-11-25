@@ -26,6 +26,7 @@ export interface StackFrameSummary {
   functionName: string;
   fileName: string;
   line: number;
+  localVariables?: Record<string, VariableValue>;
 }
 
 export interface VariableValue {

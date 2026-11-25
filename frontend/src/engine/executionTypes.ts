@@ -172,6 +172,7 @@ export type VisualizationState =
       nodes: TreeNodeState[];
       edges: TreeEdgeState[];
       currentNodeId?: string;
+      arraySnapshot?: ArrayElement[];
     }
   | {
       type: "linked-list";

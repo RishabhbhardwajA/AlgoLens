@@ -80,6 +80,8 @@ export function resolveSourceLine(
     if (typeof pattern === "string") {
       isMatch = line.includes(pattern);
     } else {
+      // Reset lastIndex before testing to prevent stale matches with global/sticky flags
+      pattern.lastIndex = 0;
       isMatch = pattern.test(line);
     }
 

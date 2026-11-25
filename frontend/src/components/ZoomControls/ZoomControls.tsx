@@ -23,11 +23,11 @@ export function ZoomControls({
 
   return (
     <div
-      className={`z-30 flex flex-col items-center bg-white border border-slate-200/90 rounded-lg shadow-xs overflow-hidden select-none ${
+      className={`z-30 flex flex-col items-center bg-white/78 backdrop-blur-xl border border-white/95 ring-1 ring-indigo-500/[0.08] rounded-2xl overflow-hidden select-none ${
         position ? positionClasses[position] : ""
       } ${className}`}
       style={{
-        boxShadow: "0 2px 6px rgba(15, 23, 42, 0.06), 0 0 1px rgba(15, 23, 42, 0.1)",
+        boxShadow: "0 8px 24px -4px rgba(99, 102, 241, 0.12), 0 2px 6px rgba(15, 23, 42, 0.04)",
       }}
       data-no-pan="true"
     >
@@ -35,7 +35,7 @@ export function ZoomControls({
       <button
         type="button"
         onClick={zoomIn}
-        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors border-b border-slate-100"
+        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-indigo-600 hover:bg-white/80 transition-colors border-b border-slate-200/50 cursor-pointer"
         title="Zoom In (+)"
         aria-label="Zoom In"
       >
@@ -46,7 +46,7 @@ export function ZoomControls({
       <button
         type="button"
         onClick={zoomOut}
-        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors border-b border-slate-100"
+        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:text-indigo-600 hover:bg-white/80 transition-colors border-b border-slate-200/50 cursor-pointer"
         title="Zoom Out (−)"
         aria-label="Zoom Out"
       >
@@ -57,10 +57,10 @@ export function ZoomControls({
       <button
         type="button"
         onClick={fitView}
-        className={`w-7 h-7 flex items-center justify-center transition-colors ${
+        className={`w-7 h-7 flex items-center justify-center transition-colors cursor-pointer ${
           isTransformed
-            ? "text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50/60"
-            : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+            ? "text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50/70"
+            : "text-slate-600 hover:text-indigo-600 hover:bg-white/80"
         }`}
         title={
           isTransformed

@@ -1,10 +1,18 @@
 import type { Request, Response, NextFunction } from "express";
 
+const IS_PROD = process.env.NODE_ENV === "production";
+
 export function securityHeaders(_req: Request, res: Response, next: NextFunction) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  // connect-src: allow localhost only in development; production uses 'self' only
+  const connectSrc = IS_PROD
+    ? "connect-src 'self' https://cdn.jsdelivr.net;"
+    : "connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173 https://cdn.jsdelivr.net;";
+
   res.setHeader(
     "Content-Security-Policy",
     "default-src 'self'; " +
@@ -12,9 +20,9 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
       "worker-src 'self' blob:; " +
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; " +
       "font-src 'self' https://fonts.gstatic.com data: https://cdn.jsdelivr.net; " +
-      "img-src 'self' data: blob:; " +
-      "connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173 https://cdn.jsdelivr.net; " +
-      "frame-ancestors 'none'; " +
+      "img-src 'self' data: blob: https://lh3.googleusercontent.com https:; " +
+      connectSrc +
+      " frame-ancestors 'none'; " +
       "base-uri 'self'; " +
       "form-action 'self';"
   );

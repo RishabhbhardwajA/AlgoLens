@@ -3,11 +3,58 @@ import type {
   ExecutionEvent,
   CallFrame,
   VisualizationState,
-  ArrayElement,
-  ElementState,
   VariableMap,
 } from "../engine/executionTypes";
-import type { TraceResult, TraceEvent, VariableValue } from "../types/multiLanguage";
+import type { TraceResult, VariableValue } from "../types/multiLanguage";
+import { buildArrayVisualizationState } from "./arrayVisualizerHelper";
+
+const POINTER_KEYS = new Set(["i", "j", "k", "p"]);
+const POINTER_SUBSTRINGS = ["left", "right", "mid", "low", "high", "idx", "index"];
+
+function isPointerName(name: string): boolean {
+  if (POINTER_KEYS.has(name)) return true;
+  return POINTER_SUBSTRINGS.some((sub) => name.includes(sub));
+}
+
+function serializeVariablesMap(
+  rawVars: Record<string, VariableValue> | undefined
+): { localVars: VariableMap; detectedArray: (number | string)[] | null; detectedPointers: Record<string, number> } {
+  const localVars: VariableMap = {};
+  let detectedArray: (number | string)[] | null = null;
+  const detectedPointers: Record<string, number> = {};
+
+  if (!rawVars) {
+    return { localVars, detectedArray, detectedPointers };
+  }
+
+  for (const [key, varMeta] of Object.entries(rawVars)) {
+    if (!varMeta) continue;
+
+    if (varMeta.isArray) {
+      const rawVals = varMeta.elements || (Array.isArray(varMeta.value) ? varMeta.value : []);
+      const parsedArr: (number | string)[] = rawVals.map((v) => {
+        if (v === null || v === undefined || v === "null") {
+          return "null";
+        }
+        const parsed = Number(v);
+        return isNaN(parsed) ? String(v) : parsed;
+      });
+      localVars[key] = parsedArr;
+      if (!detectedArray || key === "arr" || key === "nums" || key === "data") {
+        detectedArray = parsedArr;
+      }
+    } else {
+      localVars[key] = varMeta.value ?? varMeta.repr;
+
+      const num = Number(varMeta.value);
+      if (Number.isInteger(num) && isPointerName(key)) {
+        detectedPointers[key] = num;
+      }
+    }
+  }
+
+  return { localVars, detectedArray, detectedPointers };
+}
 
 export function convertTraceToExecutionSteps(
   traceResult: TraceResult,
@@ -18,112 +65,40 @@ export function convertTraceToExecutionSteps(
   }
 
   const steps: ExecutionStep[] = [];
-  let previousArraySnapshot: number[] = customArray ? [...customArray] : [];
+  let previousArraySnapshot: (number | string)[] = customArray ? [...customArray] : [];
 
   for (let i = 0; i < traceResult.events.length; i++) {
     const ev = traceResult.events[i];
-    const localVars: VariableMap = {};
-    let detectedArray: number[] | null = null;
-    const detectedPointers: Record<string, number> = {};
+    const { localVars, detectedArray: eventArr, detectedPointers } = serializeVariablesMap(ev.variables);
 
-    // 1. Process variables
-    if (ev.variables) {
-      for (const [key, varMeta] of Object.entries(ev.variables)) {
-        if (!varMeta) continue;
-
-        // If variable is an array
-        if (varMeta.isArray) {
-          const rawVals = varMeta.elements || (Array.isArray(varMeta.value) ? varMeta.value : []);
-          const numArr = rawVals.map((v) => {
-            const parsed = Number(v);
-            return isNaN(parsed) ? 0 : parsed;
-          });
-          localVars[key] = numArr;
-          if (!detectedArray || key === "arr" || key === "nums" || key === "data") {
-            detectedArray = numArr;
-          }
-        } else {
-          localVars[key] = varMeta.value ?? varMeta.repr;
-
-          // Check if variable looks like a pointer index
-          const num = Number(varMeta.value);
-          if (
-            Number.isInteger(num) &&
-            (key.includes("left") ||
-              key.includes("right") ||
-              key.includes("mid") ||
-              key.includes("low") ||
-              key.includes("high") ||
-              key.includes("idx") ||
-              key.includes("index") ||
-              key === "i" ||
-              key === "j" ||
-              key === "k" ||
-              key === "p")
-          ) {
-            detectedPointers[key] = num;
-          }
-        }
-      }
-    }
-
-    if (detectedArray) {
-      previousArraySnapshot = [...detectedArray];
+    let activeArray = eventArr;
+    if (activeArray) {
+      previousArraySnapshot = [...activeArray];
     } else if (previousArraySnapshot.length > 0) {
-      detectedArray = [...previousArraySnapshot];
+      activeArray = [...previousArraySnapshot];
     }
 
-    // 2. Build visualization state
-    let visState: VisualizationState = { type: "none" };
+    // 2. Build visualization state via unified DRY helper (preserves negative/out-of-bounds pointers)
+    const visState: VisualizationState =
+      activeArray && activeArray.length > 0
+        ? buildArrayVisualizationState(activeArray, detectedPointers)
+        : { type: "none" };
 
-    if (detectedArray && detectedArray.length > 0) {
-      const elements: ArrayElement[] = detectedArray.map((val, idx) => {
-        let state: ElementState = "default";
-        const matchingPointerNames: string[] = [];
-
-        for (const [pName, pIdx] of Object.entries(detectedPointers)) {
-          if (pIdx === idx) {
-            matchingPointerNames.push(pName);
-          }
-        }
-
-        let label: string | undefined = undefined;
-        if (matchingPointerNames.length > 0) {
-          label = matchingPointerNames.join(", ");
-          if (matchingPointerNames.some((n) => n.includes("mid"))) {
-            state = "pointer-mid";
-          } else if (matchingPointerNames.some((n) => n.includes("left") || n.includes("low"))) {
-            state = "pointer-left";
-          } else if (matchingPointerNames.some((n) => n.includes("right") || n.includes("high"))) {
-            state = "pointer-right";
-          } else {
-            state = "current";
-          }
-        }
-
-        return {
-          value: val,
-          index: idx,
-          state,
-          label,
-        };
-      });
-
-      visState = {
-        type: "array",
-        elements,
-        pointers: detectedPointers,
+    // 3. Map CallStack (preserving per-frame localVariables captured by JDI)
+    const callStack: CallFrame[] = (ev.stackFrames || []).map((sf, idx) => {
+      const frameVars = sf.localVariables
+        ? serializeVariablesMap(sf.localVariables).localVars
+        : idx === 0
+        ? localVars
+        : {};
+      return {
+        id: `frame-${sf.depth ?? idx}-${sf.functionName}`,
+        functionName: sf.functionName,
+        args: {},
+        localVariables: frameVars,
+        line: sf.line,
       };
-    }
-
-    // 3. Map CallStack
-    const callStack: CallFrame[] = (ev.stackFrames || []).map((sf, idx) => ({
-      id: `frame-${sf.depth ?? idx}-${sf.functionName}`,
-      functionName: sf.functionName,
-      args: {},
-      localVariables: idx === 0 ? localVars : {},
-      line: sf.line,
-    }));
+    });
 
     // 4. Map Event & Explanation
     let explanation = ev.explanation || `Executed line ${ev.line} in ${ev.functionName}()`;
@@ -161,6 +136,27 @@ export function convertTraceToExecutionSteps(
       explanation,
       returnValue: ev.returnValue?.value,
       depth: ev.stackFrames?.length || 1,
+    });
+  }
+
+  // 5. Append explicit truncation notification if step ceiling was hit
+  if (traceResult.truncated && steps.length > 0) {
+    const lastStep = steps[steps.length - 1];
+    const limitWarning = `⚠️ Execution truncated at ${steps.length} step limit. Inspect loop conditions for possible infinite iteration or narrow the input size.`;
+    steps.push({
+      id: lastStep.id + 1,
+      line: lastStep.line,
+      event: {
+        type: "STEP",
+        description: limitWarning,
+        line: lastStep.line,
+      },
+      functionName: lastStep.functionName,
+      callStack: lastStep.callStack,
+      localVariables: lastStep.localVariables,
+      visualizationState: lastStep.visualizationState,
+      explanation: limitWarning,
+      depth: lastStep.depth,
     });
   }
 

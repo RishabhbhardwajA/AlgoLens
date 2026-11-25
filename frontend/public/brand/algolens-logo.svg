@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 436 112" fill="none" role="img" aria-labelledby="algolens-logo-title">
+  <title id="algolens-logo-title">AlgoLens — Interactive DSA Platform</title>
+  <defs>
+    <clipPath id="algolens-logo-clip">
+      <circle cx="64" cy="64" r="53" />
+    </clipPath>
+    <linearGradient id="algolens-amber-arc" x1="28" y1="98" x2="102" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EE9A2C" />
+      <stop offset="65%" stop-color="#D97458" />
+      <stop offset="100%" stop-color="#9A4D86" />
+    </linearGradient>
+    <linearGradient id="algolens-violet-arc" x1="88" y1="24" x2="96" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8E4884" />
+      <stop offset="70%" stop-color="#B85F7A" />
+      <stop offset="100%" stop-color="#EA8F32" />
+    </linearGradient>
+    <linearGradient id="algolens-word-lens" x1="220" y1="20" x2="360" y2="68" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F6AE44" />
+      <stop offset="100%" stop-color="#E27C22" />
+    </linearGradient>
+  </defs>
+
+  <rect width="436" height="112" rx="18" fill="#102438" />
+
+  <!-- Isolated Algorithm Focus Mark Scaled to 96x96 -->
+  <g id="algolens-mark-instance" transform="translate(8, 8) scale(0.75)">
+    <g id="lens-shell">
+      <circle cx="64" cy="64" r="60" fill="#102940" />
+      <circle cx="64" cy="64" r="58.5" stroke="#235178" stroke-width="2" />
+      <circle cx="64" cy="64" r="46.5" fill="#13314C" stroke="#1B4469" stroke-width="1.5" />
+    </g>
+
+    <g id="sorting-blocks" clip-path="url(#algolens-logo-clip)">
+      <rect x="16" y="49" width="10" height="15" fill="#1B5585" />
+      <rect x="26" y="42" width="10" height="22" fill="#1D6792" />
+      <rect x="36" y="34" width="10" height="30" fill="#156E6B" />
+      <rect x="46" y="26" width="11" height="38" fill="#1F867D" />
+      <rect x="57" y="21" width="11" height="43" fill="#E69934" />
+      <rect x="68" y="16" width="11" height="48" fill="#EF9A28" />
+      <rect x="79" y="13" width="11" height="51" fill="#84427D" />
+    </g>
+
+    <g id="aperture-core">
+      <circle cx="64" cy="64" r="20" fill="#0E2235" stroke="#1E4B72" stroke-width="1.5" />
+    </g>
+
+    <g id="network-branches" clip-path="url(#algolens-logo-clip)">
+      <path d="M44 76 L58 106" stroke="#8E4884" stroke-opacity="0.82" stroke-width="4" stroke-linecap="round" />
+      <path d="M37 86 L55 96 L73 82 L89 94 L103 77 L93 58" stroke="#218B7F" stroke-opacity="0.78" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M89 94 L83 68" stroke="#218B7F" stroke-opacity="0.65" stroke-width="2.5" stroke-linecap="round" />
+      <circle cx="37" cy="86" r="3.4" fill="#2CA394" fill-opacity="0.9" />
+      <circle cx="55" cy="96" r="3.6" fill="#218B7F" fill-opacity="0.95" />
+      <circle cx="73" cy="82" r="3.8" fill="#36A899" fill-opacity="0.92" />
+      <circle cx="89" cy="94" r="3.4" fill="#218B7F" fill-opacity="0.95" />
+      <circle cx="103" cy="77" r="3.2" fill="#36A899" fill-opacity="0.9" />
+
+      <path d="M21 67 L35 68 L42 90 L56 93 L71 102 L83 81 L96 76 L91 61" stroke="#EE9A2C" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M56 93 L83 81" stroke="#F5AE42" stroke-opacity="0.72" stroke-width="2.8" stroke-linecap="round" />
+      <circle cx="21" cy="67" r="4" fill="#F5AE42" />
+      <circle cx="35" cy="68" r="4.2" fill="#EE9A2C" />
+      <circle cx="42" cy="90" r="3.8" fill="#F5AE42" />
+      <circle cx="56" cy="93" r="4.2" fill="#EE9A2C" />
+      <circle cx="71" cy="102" r="3.8" fill="#F5AE42" />
+      <circle cx="83" cy="81" r="4.2" fill="#EE9A2C" />
+      <circle cx="96" cy="76" r="3.8" fill="#F5AE42" />
+      <circle cx="91" cy="61" r="3.6" fill="#F8C978" />
+    </g>
+
+    <g id="path-arrows">
+      <path d="M96 29 A46 46 0 0 1 94 100" stroke="url(#algolens-violet-arc)" stroke-width="3.6" stroke-linecap="round" />
+      <polygon points="89,100 100,96 94,107" fill="#EA8F32" />
+      <path d="M30 98 A48 48 0 0 0 92 103" stroke="url(#algolens-amber-arc)" stroke-width="3.6" stroke-linecap="round" />
+      <polygon points="34,92 25,96 34,104" fill="#9A4D86" />
+    </g>
+  </g>
+
+  <!-- Brand Wordmark + Tracked Subtitle -->
+  <g id="algolens-wordmark">
+    <text x="122" y="64" font-family="Plus Jakarta Sans, Inter, system-ui, sans-serif" font-weight="800" font-size="46" letter-spacing="-1.2">
+      <tspan fill="#F4F5F7">Algo</tspan><tspan fill="url(#algolens-word-lens)">Lens</tspan>
+    </text>
+    <text x="124" y="88" font-family="Inter, system-ui, sans-serif" font-weight="500" font-size="14" letter-spacing="1.35" fill="#98A6B8">
+      Interactive DSA Platform
+    </text>
+  </g>
+</svg>

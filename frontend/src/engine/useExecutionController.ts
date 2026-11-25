@@ -3,6 +3,7 @@
 // ============================================================
 import { create } from "zustand";
 import { useZoomStore } from "./useZoomStore";
+import { useChallengeStore } from "./useChallengeStore";
 import type {
   ExecutionStep,
   VisualizableAlgorithm,
@@ -71,6 +72,7 @@ export const useExecutionStore = create<ExecutionStore>((set, get) => ({
   loadAlgorithm(alg: VisualizableAlgorithm) {
     clearPlay();
     useZoomStore.getState().resetZoom();
+    useChallengeStore.getState().resetForAlgorithmSwitch();
     set({
       algorithm: alg,
       algorithmId: alg.id,

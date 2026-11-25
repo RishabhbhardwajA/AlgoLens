@@ -58,6 +58,7 @@ export async function fetchCapabilities(): Promise<LanguageCapability[]> {
 export async function runCode(req: RunRequest): Promise<ExecutionResult> {
   const res = await fetch(`${BASE_URL}/run`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
@@ -75,6 +76,7 @@ export async function runCode(req: RunRequest): Promise<ExecutionResult> {
 export async function traceCode(req: TraceRequest): Promise<TraceResult> {
   const res = await fetch(`${BASE_URL}/trace`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },

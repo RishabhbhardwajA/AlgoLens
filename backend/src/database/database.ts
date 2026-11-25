@@ -39,12 +39,27 @@ export function initDatabase(): void {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
+      password_hash TEXT NULL,
+      google_id TEXT UNIQUE NULL,
       bio TEXT DEFAULT '',
       avatar_url TEXT DEFAULT '',
       role TEXT DEFAULT 'student',
+      is_email_verified INTEGER NOT NULL DEFAULT 0,
+      auth_provider TEXT NOT NULL DEFAULT 'local',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS otp_verifications (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      pending_name TEXT NOT NULL,
+      pending_password_hash TEXT NOT NULL,
+      otp_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT NOT NULL,
+      last_sent_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS user_bookmarks (
@@ -89,12 +104,93 @@ export function initDatabase(): void {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS user_challenge_attempts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      algorithm_id TEXT NOT NULL,
+      step_index INTEGER NOT NULL,
+      challenge_type TEXT NOT NULL,
+      selected_option TEXT NOT NULL,
+      correct_option TEXT NOT NULL,
+      is_correct INTEGER NOT NULL,
+      xp_earned INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS bookmarked_traces (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      algorithm_id TEXT NOT NULL,
+      step_index INTEGER NOT NULL,
+      step_snapshot TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_verifications(email);
     CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id);
     CREATE INDEX IF NOT EXISTS idx_progress_user ON user_progress(user_id);
     CREATE INDEX IF NOT EXISTS idx_snippets_user ON saved_snippets(user_id);
     CREATE INDEX IF NOT EXISTS idx_resets_token ON password_resets(token);
+    CREATE INDEX IF NOT EXISTS idx_challenges_user ON user_challenge_attempts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_trace_bookmarks_user ON bookmarked_traces(user_id);
   `);
+
+  // Safe idempotent migration for existing databases lacking Google OAuth / nullable password_hash
+  const userCols = db.prepare("PRAGMA table_info(users)").all() as Array<{
+    name: string;
+    notnull: number;
+  }>;
+  const hasGoogleId = userCols.some((c) => c.name === "google_id");
+  const passwordNotNull = userCols.find((c) => c.name === "password_hash")?.notnull === 1;
+
+  if (!hasGoogleId || passwordNotNull) {
+    db.exec("PRAGMA foreign_keys = OFF;");
+    db.exec("BEGIN TRANSACTION;");
+    try {
+      db.exec(`
+        CREATE TABLE users_migrated (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NULL,
+          google_id TEXT UNIQUE NULL,
+          bio TEXT DEFAULT '',
+          avatar_url TEXT DEFAULT '',
+          role TEXT DEFAULT 'student',
+          is_email_verified INTEGER NOT NULL DEFAULT 0,
+          auth_provider TEXT NOT NULL DEFAULT 'local',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO users_migrated (
+          id, name, email, password_hash, google_id, bio, avatar_url, role,
+          is_email_verified, auth_provider, created_at, updated_at
+        )
+        SELECT
+          id, name, email, password_hash, NULL, COALESCE(bio, ''), COALESCE(avatar_url, ''),
+          COALESCE(role, 'student'), 1, 'local', created_at, updated_at
+        FROM users;
+
+        DROP TABLE users;
+        ALTER TABLE users_migrated RENAME TO users;
+        CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
+      `);
+      db.exec("COMMIT;");
+    } catch (migrationErr) {
+      db.exec("ROLLBACK;");
+      throw migrationErr;
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON;");
+    }
+  } else {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);");
+  }
 }
 
 // Automatically initialize schema upon load

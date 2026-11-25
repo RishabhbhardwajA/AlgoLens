@@ -1,13 +1,18 @@
 import type { Request } from "express";
 
+export type AuthProvider = "local" | "google" | "both";
+
 export interface UserRecord {
   id: string;
   name: string;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
+  google_id: string | null;
   bio: string;
   avatar_url: string;
   role: string;
+  is_email_verified: number;
+  auth_provider: AuthProvider;
   created_at: string;
   updated_at: string;
 }
@@ -19,8 +24,22 @@ export interface SanitizedUser {
   bio: string;
   avatar_url: string;
   role: string;
+  is_email_verified: boolean;
+  auth_provider: AuthProvider;
   created_at: string;
   updated_at: string;
+}
+
+export interface OtpVerificationRecord {
+  id: string;
+  email: string;
+  pending_name: string;
+  pending_password_hash: string;
+  otp_hash: string;
+  attempts: number;
+  expires_at: string;
+  last_sent_at: string;
+  created_at: string;
 }
 
 export interface BookmarkRecord {
@@ -68,4 +87,44 @@ export interface UserStats {
   completedCount: number;
   snippetsCount: number;
   quizzesAttempted: number;
+}
+
+export interface ChallengeAttemptRecord {
+  id: string;
+  user_id: string;
+  algorithm_id: string;
+  step_index: number;
+  challenge_type: string;
+  selected_option: string;
+  correct_option: string;
+  is_correct: number;
+  xp_earned: number;
+  created_at: string;
+}
+
+export interface ChallengeStats {
+  totalAttempts: number;
+  totalCorrect: number;
+  accuracyPercent: number;
+  totalXp: number;
+  recentAttempts: ChallengeAttemptRecord[];
+}
+
+export interface BookmarkedTraceRecord {
+  id: string;
+  user_id: string;
+  algorithm_id: string;
+  step_index: number;
+  step_snapshot: string;
+  note: string;
+  created_at: string;
+}
+
+export interface WeakTopicSummary {
+  topic: string;
+  algorithmId: string;
+  attempts: number;
+  mistakes: number;
+  accuracyPercent: number;
+  recommendation: string;
 }

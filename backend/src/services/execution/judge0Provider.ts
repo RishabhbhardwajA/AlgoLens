@@ -72,6 +72,7 @@ export class Judge0Provider implements ExecutionProvider {
       method: "POST",
       headers: this.getHeaders(),
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
@@ -95,6 +96,7 @@ export class Judge0Provider implements ExecutionProvider {
       const response = await fetch(pollUrl, {
         method: "GET",
         headers: this.getHeaders(),
+        signal: AbortSignal.timeout(8000),
       });
 
       if (!response.ok) {

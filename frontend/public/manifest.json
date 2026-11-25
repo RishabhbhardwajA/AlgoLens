@@ -1,0 +1,30 @@
+{
+  "name": "AlgoLens — Interactive DSA Platform",
+  "short_name": "AlgoLens",
+  "description": "See algorithms think in real-time with interactive step-by-step DSA visualization, OpenJDK JDI traces, and Big-O benchmarks.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF8FF",
+  "theme_color": "#102940",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

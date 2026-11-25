@@ -6,7 +6,6 @@ import { ArrayVisualizer } from "@/visualizers/ArrayVisualizer/ArrayVisualizer";
 import { ExecutionControls } from "@/components/ExecutionControls/ExecutionControls";
 import { VariablesPanel } from "@/components/VariablesPanel/VariablesPanel";
 import { CallStackPanel } from "@/components/CallStack/CallStackPanel";
-import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/useAuthStore";
 import {
   runCode,
@@ -19,6 +18,10 @@ import type {
   LanguageCapability,
   TraceResult,
 } from "@/types/multiLanguage";
+import { MULTI_LANG_PRESETS } from "@/features/code-playground/presets";
+import { SocraticTutorModal } from "@/components/SocraticTutor/SocraticTutorModal";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { buildToolJsonLd } from "@/utils/seoSchemas";
 import {
   Code2,
   Play,
@@ -40,191 +43,22 @@ import {
   HardDrive,
 } from "lucide-react";
 
-interface PresetItem {
-  name: string;
-  code: string;
-  array: string;
-  description: string;
-}
-
-const MULTI_LANG_PRESETS: Record<string, Record<string, PresetItem>> = {
-  java: {
-    java_binarySearch: {
-      name: "Java: Binary Search",
-      array: "[2, 4, 6, 8, 10, 12, 14, 16]",
-      description: "Binary search in Java inspected via OpenJDK JDI debugger.",
-      code: `public class Solution {
-    public static int binarySearch(int[] nums, int target) {
-        int left = 0;
-        int right = nums.length - 1;
-        while (left <= right) {
-            int mid = left + (right - left) / 2;
-            if (nums[mid] == target) {
-                return mid;
-            } else if (nums[mid] < target) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
-        }
-        return -1;
-    }
-
-    public static void main(String[] args) {
-        int[] data = { 2, 4, 6, 8, 10, 12, 14, 16 };
-        int target = 10;
-        int result = binarySearch(data, target);
-        System.out.println("Found target " + target + " at index: " + result);
-    }
-}`,
-    },
-    java_loopSum: {
-      name: "Java: Array Loop & Sum",
-      array: "[5, 10, 15, 20, 25]",
-      description: "Array iteration and accumulator variable tracing.",
-      code: `public class Solution {
-    public static void main(String[] args) {
-        int[] arr = { 5, 10, 15, 20, 25 };
-        int sum = 0;
-        for (int i = 0; i < arr.length; i++) {
-            sum += arr[i];
-        }
-        System.out.println("Final Sum: " + sum);
-    }
-}`,
-    },
-    java_factorial: {
-      name: "Java: Recursive Factorial",
-      array: "[1, 2, 3, 4, 5]",
-      description: "Recursive function call stack inspection.",
-      code: `public class Solution {
-    public static int factorial(int n) {
-        if (n <= 1) return 1;
-        return n * factorial(n - 1);
-    }
-
-    public static void main(String[] args) {
-        int n = 4;
-        int ans = factorial(n);
-        System.out.println("Factorial of " + n + " = " + ans);
-    }
-}`,
-    },
-  },
-  python: {
-    py_twoSum: {
-      name: "Python: Two Sum",
-      array: "[2, 7, 11, 15]",
-      description: "Two Sum hash map lookup in Python.",
-      code: `def two_sum(nums, target):
-    lookup = {}
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in lookup:
-            return [lookup[complement], i]
-        lookup[num] = i
-    return []
-
-nums = [2, 7, 11, 15]
-target = 9
-result = two_sum(nums, target)
-print(f"Indices for target {target}: {result}")
-`,
-    },
-    py_binarySearch: {
-      name: "Python: Binary Search",
-      array: "[1, 3, 5, 7, 9, 11]",
-      description: "Binary search in Python.",
-      code: `def binary_search(arr, target):
-    left, right = 0, len(arr) - 1
-    while left <= right:
-        mid = (left + right) // 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-    return -1
-
-data = [1, 3, 5, 7, 9, 11]
-target = 7
-idx = binary_search(data, target)
-print(f"Target {target} found at index {idx}")
-`,
-    },
-  },
-  cpp: {
-    cpp_vector: {
-      name: "C++: Vector Sum",
-      array: "[10, 20, 30, 40]",
-      description: "C++ standard library vector accumulation.",
-      code: `#include <iostream>
-#include <vector>
-#include <numeric>
-
-int main() {
-    std::vector<int> nums = { 10, 20, 30, 40 };
-    int total = std::accumulate(nums.begin(), nums.end(), 0);
-    std::cout << "Vector sum: " << total << std::endl;
-    return 0;
-}
-`,
-    },
-  },
-  javascript: {
-    peakElement: {
-      name: "JS: Peak Element",
-      array: "[1, 3, 20, 4, 1, 0]",
-      description: "Binary search to find peak element where arr[i] > arr[i+1].",
-      code: `// Find Peak Element using Binary Search
-let low = 0;
-let high = arr.length - 1;
-
-while (low < high) {
-  let mid = Math.floor((low + high) / 2);
-  tracer.pointer("low", low);
-  tracer.pointer("mid", mid);
-  tracer.pointer("high", high);
-
-  tracer.explain(\`Checking mid index \${mid} (val: \${arr[mid]}) against mid+1 (\${arr[mid + 1]})\`);
-
-  if (tracer.compare(mid, mid + 1)) {
-    tracer.explain("Left element is greater -> peak lies in left subarray");
-    high = mid;
-  } else {
-    tracer.explain("Right element is greater -> peak lies in right subarray");
-    low = mid + 1;
-  }
-}
-
-tracer.pointer("peak", low);
-tracer.result(low, \`Peak element found at index \${low} with value \${arr[low]}!\`);
-return low;`,
-    },
-    bubbleSort: {
-      name: "JS: Bubble Sort",
-      array: "[29, 10, 14, 37, 14, 2, 45, 18]",
-      description: "Classic adjacent comparisons and bubbling of maximums.",
-      code: `// Bubble Sort Implementation
-for (let i = 0; i < arr.length; i++) {
-  tracer.pointer("i", i);
-  for (let j = 0; j < arr.length - i - 1; j++) {
-    tracer.pointer("j", j);
-    if (tracer.compare(j, j + 1)) {
-      tracer.swap(j, j + 1);
-    }
-  }
-}
-tracer.result(arr, "Bubble Sort completed! Array is fully sorted.");
-return arr;`,
-    },
-  },
-};
-
 export default function Playground() {
-  const navigate = useNavigate();
-  const { isAuthenticated, saveSnippet } = useAuthStore();
+  useDocumentMeta({
+    title: "Multi-Language Sandbox & Java JDI Debugger | AlgoLens",
+    description:
+      "Execute Java, Python, C++, and JavaScript code online or step through live OpenJDK JDI traces with stack frames and variable visualization.",
+    canonicalPath: "/playground",
+    ogImage: "/og/playground.png",
+    jsonLd: buildToolJsonLd(
+      typeof window !== "undefined" ? window.location.origin : "",
+      "/playground",
+      "AlgoLens Multi-Language Sandbox & Java JDI Debugger",
+      "Compile and step through Java programs with real OpenJDK JDI debugger events."
+    ),
+  });
+
+  const { saveSnippet, requireAuthAction } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -245,6 +79,7 @@ export default function Playground() {
   const [traceResult, setTraceResult] = useState<TraceResult | null>(null);
   const [activeTab, setActiveTab] = useState<"code" | "terminal">("code");
   const [activeRightTab, setActiveRightTab] = useState<"visualizer" | "panels">("visualizer");
+  const [isTutorOpen, setIsTutorOpen] = useState(false);
 
   const { loadAlgorithm } = useExecutionStore();
   const currentStep = useCurrentStep();
@@ -253,6 +88,7 @@ export default function Playground() {
   const isFinalStep = totalSteps > 0 && currentStepIndex >= totalSteps - 1;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeRequestTokenRef = useRef(0);
 
   // Load capabilities on mount
   useEffect(() => {
@@ -261,8 +97,11 @@ export default function Playground() {
     });
   }, []);
 
-  // When language changes, update presets
+  // When language changes, update presets and invalidate pending async requests
   const handleLanguageChange = (newLang: string) => {
+    activeRequestTokenRef.current += 1;
+    setIsRunning(false);
+    setIsTracing(false);
     setSelectedLanguage(newLang);
     const presets = MULTI_LANG_PRESETS[newLang];
     if (presets) {
@@ -276,6 +115,9 @@ export default function Playground() {
   };
 
   const handleSelectPreset = (key: string) => {
+    activeRequestTokenRef.current += 1;
+    setIsRunning(false);
+    setIsTracing(false);
     setSelectedPresetKey(key);
     const preset = MULTI_LANG_PRESETS[selectedLanguage]?.[key];
     if (preset) {
@@ -311,6 +153,7 @@ export default function Playground() {
 
   // Run Mode Handler (Real backend multi-language execution)
   const handleRun = async () => {
+    const requestToken = ++activeRequestTokenRef.current;
     setIsRunning(true);
     setInputError(null);
     try {
@@ -318,9 +161,11 @@ export default function Playground() {
         language: selectedLanguage,
         sourceCode: code,
       });
+      if (activeRequestTokenRef.current !== requestToken) return;
       setExecutionResult(res);
       setActiveTab("terminal");
     } catch (err: any) {
+      if (activeRequestTokenRef.current !== requestToken) return;
       setExecutionResult({
         stdout: "",
         stderr: err.message || "Failed to execute code",
@@ -330,12 +175,15 @@ export default function Playground() {
       });
       setActiveTab("terminal");
     } finally {
-      setIsRunning(false);
+      if (activeRequestTokenRef.current === requestToken) {
+        setIsRunning(false);
+      }
     }
   };
 
   // Trace Mode Handler (JDI for Java or Worker for JS)
   const handleTrace = async () => {
+    const requestToken = ++activeRequestTokenRef.current;
     setIsTracing(true);
     setInputError(null);
 
@@ -352,6 +200,7 @@ export default function Playground() {
       if (selectedLanguage === "javascript") {
         // Fallback to in-browser sandboxed tracer for JS
         const result = await runCustomAlgorithmAsync(code, parsedArr, { timeoutMs: 2500 });
+        if (activeRequestTokenRef.current !== requestToken) return;
         if (result.success && result.steps.length > 0) {
           const virtualAlgo: VisualizableAlgorithm<number[]> = {
             id: "custom-js-algo",
@@ -372,6 +221,19 @@ export default function Playground() {
           };
           loadAlgorithm(virtualAlgo);
           setActiveRightTab("visualizer");
+        } else {
+          const linePrefix = result.errorLine ? `Line ${result.errorLine}: ` : "";
+          const failureMessage =
+            `${linePrefix}${result.error || "JavaScript execution produced no traceable steps."}`;
+          setInputError(failureMessage);
+          setActiveTab("terminal");
+          setExecutionResult({
+            stdout: result.logs.join("\n"),
+            stderr: failureMessage,
+            compileOutput: "",
+            status: "RUNTIME_ERROR",
+            exitCode: 1,
+          });
         }
         return;
       }
@@ -380,8 +242,9 @@ export default function Playground() {
       const trace = await traceCode({
         language: selectedLanguage,
         sourceCode: code,
-        maxSteps: 500,
+        maxSteps: 1000,
       });
+      if (activeRequestTokenRef.current !== requestToken) return;
 
       setTraceResult(trace);
 
@@ -420,32 +283,33 @@ export default function Playground() {
         setActiveRightTab("visualizer");
       }
     } catch (err: any) {
+      if (activeRequestTokenRef.current !== requestToken) return;
       setInputError(err.message || "Failed to trace code");
     } finally {
-      setIsTracing(false);
+      if (activeRequestTokenRef.current === requestToken) {
+        setIsTracing(false);
+      }
     }
   };
 
-  const handleSaveSnippet = async () => {
-    if (!isAuthenticated) {
-      navigate("/login");
-      return;
-    }
-    setIsSaving(true);
-    const title =
-      MULTI_LANG_PRESETS[selectedLanguage]?.[selectedPresetKey]?.name ||
-      `${selectedLanguage.toUpperCase()} Snippet`;
-    const ok = await saveSnippet({
-      title,
-      code,
-      input_data: rawArrayInput,
-      algorithm_category: "Arrays",
+  const handleSaveSnippet = () => {
+    requireAuthAction("Save custom code snippet to your library", async () => {
+      setIsSaving(true);
+      const title =
+        MULTI_LANG_PRESETS[selectedLanguage]?.[selectedPresetKey]?.name ||
+        `${selectedLanguage.toUpperCase()} Snippet`;
+      const ok = await saveSnippet({
+        title,
+        code,
+        input_data: rawArrayInput,
+        algorithm_category: "Arrays",
+      });
+      setIsSaving(false);
+      if (ok) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2500);
+      }
     });
-    setIsSaving(false);
-    if (ok) {
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2500);
-    }
   };
 
   // Check language capabilities
@@ -464,51 +328,53 @@ export default function Playground() {
   const currentLine = currentStep?.line ?? null;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] bg-transparent overflow-hidden font-sans">
+    <div className="flex flex-col min-h-[calc(100vh-56px)] lg:h-[calc(100vh-56px)] bg-transparent overflow-y-auto lg:overflow-hidden font-sans">
       {/* Top Banner / HUD */}
       <div
-        className="flex items-center justify-between px-6 py-2.5 border-b z-10 shrink-0 h-14"
+        className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-6 py-2.5 border-b z-10 shrink-0 min-h-14"
         style={{
-          background: "rgba(255, 255, 255, 0.88)",
-          backdropFilter: "blur(16px)",
-          borderColor: "rgba(226, 232, 240, 0.8)",
+          background: "rgba(255, 255, 255, 0.72)",
+          backdropFilter: "blur(20px) saturate(165%)",
+          WebkitBackdropFilter: "blur(20px) saturate(165%)",
+          borderColor: "rgba(255, 255, 255, 0.85)",
+          boxShadow: "0 1px 0 rgba(99, 102, 241, 0.06)",
         }}
       >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-xs">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-sky-500 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20 shrink-0">
             <Code2 className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-sm font-bold text-slate-900 tracking-tight">
                 Multi-Language Execution & Tracing
               </h1>
               {currentCapability.supportsTrace ? (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50/90 text-emerald-700 border border-emerald-200/80 flex items-center gap-1">
                   <Sparkles className="w-2.5 h-2.5" />
                   JDI Trace Ready
                 </span>
               ) : (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50/90 text-amber-700 border border-amber-200/80">
                   Run-Only Mode
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="hidden sm:block text-[11px] text-slate-500">
               Run arbitrary code or step through genuine Java debugger execution with stack frames and variable tracking.
             </p>
           </div>
         </div>
 
         {/* Language & Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Language Selector */}
-          <div className="flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-xs font-semibold">
+          <div className="flex items-center p-1 rounded-full glass-capsule-track text-xs font-semibold">
             <button
               onClick={() => handleLanguageChange("java")}
-              className={`px-2.5 py-1 rounded-md transition-all text-xs flex items-center gap-1.5 ${
+              className={`px-3 py-1 rounded-full transition-all text-xs flex items-center gap-1.5 cursor-pointer ${
                 selectedLanguage === "java"
-                  ? "bg-white text-indigo-700 shadow-xs font-bold"
+                  ? "glass-capsule-active font-bold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -517,9 +383,9 @@ export default function Playground() {
             </button>
             <button
               onClick={() => handleLanguageChange("python")}
-              className={`px-2.5 py-1 rounded-md transition-all text-xs ${
+              className={`px-3 py-1 rounded-full transition-all text-xs cursor-pointer ${
                 selectedLanguage === "python"
-                  ? "bg-white text-indigo-700 shadow-xs font-bold"
+                  ? "glass-capsule-active font-bold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -527,9 +393,9 @@ export default function Playground() {
             </button>
             <button
               onClick={() => handleLanguageChange("cpp")}
-              className={`px-2.5 py-1 rounded-md transition-all text-xs ${
+              className={`px-3 py-1 rounded-full transition-all text-xs cursor-pointer ${
                 selectedLanguage === "cpp"
-                  ? "bg-white text-indigo-700 shadow-xs font-bold"
+                  ? "glass-capsule-active font-bold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -537,9 +403,9 @@ export default function Playground() {
             </button>
             <button
               onClick={() => handleLanguageChange("javascript")}
-              className={`px-2.5 py-1 rounded-md transition-all text-xs ${
+              className={`px-3 py-1 rounded-full transition-all text-xs cursor-pointer ${
                 selectedLanguage === "javascript"
-                  ? "bg-white text-indigo-700 shadow-xs font-bold"
+                  ? "glass-capsule-active font-bold"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -548,14 +414,14 @@ export default function Playground() {
           </div>
 
           {/* Preset Selector */}
-          <div className="hidden md:flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-xs">
+          <div className="hidden md:flex items-center p-1 rounded-full glass-capsule-track text-xs">
             {Object.entries(MULTI_LANG_PRESETS[selectedLanguage] || {}).map(([key, item]) => (
               <button
                 key={key}
                 onClick={() => handleSelectPreset(key)}
-                className={`px-2 py-1 rounded-md transition-all font-medium text-xs ${
+                className={`px-2.5 py-1 rounded-full transition-all font-medium text-xs cursor-pointer ${
                   selectedPresetKey === key
-                    ? "bg-white text-indigo-700 shadow-xs font-semibold"
+                    ? "glass-capsule-active font-semibold"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
@@ -568,10 +434,10 @@ export default function Playground() {
           <button
             onClick={handleSaveSnippet}
             disabled={isSaving}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border backdrop-blur-md transition-all cursor-pointer ${
               saveSuccess
-                ? "bg-emerald-50 text-emerald-700 border-emerald-300 shadow-xs"
-                : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+                ? "bg-emerald-50/90 text-emerald-700 border-emerald-300/80 shadow-xs"
+                : "bg-white/75 hover:bg-white text-slate-700 border-white/90 ring-1 ring-slate-200/70"
             }`}
           >
             {saveSuccess ? (
@@ -587,11 +453,27 @@ export default function Playground() {
             )}
           </button>
 
+          {/* Socratic Tutor Button */}
+          <button
+            onClick={() =>
+              requireAuthAction("Ask Gemini Socratic Step & Bug Tutor", () => {
+                setIsTutorOpen(true);
+              })
+            }
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-violet-50/85 hover:bg-violet-100/90 text-violet-700 border border-violet-200/80 backdrop-blur-md text-xs font-semibold transition-all cursor-pointer"
+            title="Ask Gemini Socratic Tutor about the current trace or error"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-violet-600" />
+            <span>Socratic Tutor</span>
+          </button>
+
           {/* Action 1: RUN Button */}
           <button
-            onClick={handleRun}
+            onClick={() =>
+              requireAuthAction("Execute custom code on AlgoLens Sandbox", () => handleRun())
+            }
             disabled={isRunning || isTracing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50"
             title="Compile and run arbitrary code to view standard output and execution metrics"
           >
             {isRunning ? (
@@ -604,12 +486,14 @@ export default function Playground() {
 
           {/* Action 2: TRACE Button */}
           <button
-            onClick={handleTrace}
+            onClick={() =>
+              requireAuthAction("Run Debugger Trace & Visualize", () => handleTrace())
+            }
             disabled={isTracing || isRunning || (!currentCapability.supportsTrace && selectedLanguage !== "javascript")}
-            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold shadow-md transition-all cursor-pointer ${
               currentCapability.supportsTrace || selectedLanguage === "javascript"
-                ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20"
-                : "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                ? "bg-gradient-to-r from-[#4648D4] to-[#6366F1] hover:opacity-95 text-white shadow-indigo-600/25"
+                : "bg-slate-200/80 text-slate-400 cursor-not-allowed shadow-none"
             }`}
             title={
               currentCapability.supportsTrace || selectedLanguage === "javascript"
@@ -633,17 +517,17 @@ export default function Playground() {
       </div>
 
       {/* Main Split Grid */}
-      <div className="flex-1 p-3 grid grid-cols-12 gap-3 overflow-hidden">
+      <div className="flex-1 p-3 grid grid-cols-12 gap-3 lg:overflow-hidden">
         {/* Left Column: Code Editor & Execution Details (5 Cols) */}
-        <section className="col-span-12 lg:col-span-5 flex flex-col gap-3 min-h-0">
+        <section className="col-span-12 lg:col-span-5 flex flex-col gap-3 min-h-[360px] lg:min-h-0">
           {/* Input Array Setup */}
-          <div className="p-3 rounded-xl bg-white border border-slate-200 shadow-xs shrink-0 flex flex-col gap-1.5">
+          <div className="p-3.5 rounded-3xl glass-surface shrink-0 flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-slate-700 flex items-center gap-1.5">
                 <FileCode className="w-3.5 h-3.5 text-indigo-600" />
                 Input Array / Context:
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">
+              <span className="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded-full bg-white/75 border border-white/90">
                 {selectedLanguage.toUpperCase()} • {currentCapability.version}
               </span>
             </div>
@@ -652,7 +536,7 @@ export default function Playground() {
               value={rawArrayInput}
               onChange={(e) => setRawArrayInput(e.target.value)}
               placeholder="[2, 4, 6, 8, 10, 12, 14, 16]"
-              className="px-3 py-1.5 text-xs font-mono rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:border-indigo-400 text-slate-800"
+              className="px-3.5 py-2 text-xs font-mono rounded-xl glass-input text-slate-800 outline-none"
             />
             {inputError && (
               <div className="text-[11px] text-rose-600 flex items-center gap-1 font-medium mt-0.5">
@@ -663,14 +547,14 @@ export default function Playground() {
           </div>
 
           {/* Editor & Console Tabs */}
-          <div className="flex-1 panel min-h-0 flex flex-col overflow-hidden bg-white">
-            <div className="h-9 px-3.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
-              <div className="flex items-center gap-2">
+          <div className="flex-1 panel rounded-3xl min-h-0 flex flex-col overflow-hidden">
+            <div className="h-10 px-3.5 border-b border-slate-200/50 flex items-center justify-between bg-white/55 backdrop-blur-md shrink-0">
+              <div className="flex items-center p-0.5 rounded-full glass-capsule-track gap-0.5">
                 <button
                   onClick={() => setActiveTab("code")}
-                  className={`text-xs font-semibold px-2.5 py-1 rounded transition-colors ${
+                  className={`text-xs font-semibold px-3 py-1 rounded-full transition-all cursor-pointer ${
                     activeTab === "code"
-                      ? "bg-white text-indigo-700 shadow-xs font-bold"
+                      ? "glass-capsule-active font-bold"
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
@@ -678,9 +562,9 @@ export default function Playground() {
                 </button>
                 <button
                   onClick={() => setActiveTab("terminal")}
-                  className={`text-xs font-semibold px-2.5 py-1 rounded transition-colors flex items-center gap-1.5 ${
+                  className={`text-xs font-semibold px-3 py-1 rounded-full transition-all flex items-center gap-1.5 cursor-pointer ${
                     activeTab === "terminal"
-                      ? "bg-white text-indigo-700 shadow-xs font-bold"
+                      ? "glass-capsule-active font-bold"
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
@@ -698,7 +582,7 @@ export default function Playground() {
 
               <div className="flex items-center gap-2">
                 {currentLine && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold animate-pulse">
+                  <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-indigo-50/90 text-indigo-700 border border-indigo-200/80 font-bold animate-pulse">
                     Exec: Line {currentLine}
                   </span>
                 )}
@@ -707,9 +591,9 @@ export default function Playground() {
             </div>
 
             {activeTab === "code" ? (
-              <div className="flex-1 flex overflow-hidden bg-white">
+              <div className="flex-1 flex overflow-hidden bg-white/45">
                 {/* Line Gutter with execution highlight */}
-                <div className="w-10 py-3 bg-slate-50/70 border-r border-slate-100 font-mono text-[11px] text-slate-400 text-right pr-2 select-none leading-relaxed">
+                <div className="w-10 py-3 bg-white/40 border-r border-slate-200/50 font-mono text-[11px] text-slate-400 text-right pr-2 select-none leading-relaxed">
                   {Array.from({ length: lineCount }, (_, i) => {
                     const lNum = i + 1;
                     const isActive = currentLine === lNum;
@@ -718,7 +602,7 @@ export default function Playground() {
                         key={lNum}
                         className={`transition-colors ${
                           isActive
-                            ? "bg-indigo-600 text-white font-bold rounded-l px-1 -mr-2 pr-3"
+                            ? "bg-indigo-600 text-white font-bold rounded-l-full px-1 -mr-2 pr-3"
                             : ""
                         }`}
                       >
@@ -733,7 +617,7 @@ export default function Playground() {
                   ref={textareaRef}
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="flex-1 p-3 font-mono text-xs text-slate-800 bg-white resize-none focus:outline-none leading-relaxed selection:bg-indigo-100 scrollbar-thin"
+                  className="flex-1 p-3 font-mono text-xs text-slate-800 bg-transparent resize-none focus:outline-none leading-relaxed selection:bg-indigo-100 scrollbar-thin"
                   spellCheck={false}
                 />
               </div>
@@ -821,33 +705,35 @@ export default function Playground() {
         </section>
 
         {/* Right Column: AlgoLens Visualizer & Debugger State (7 Cols) */}
-        <section className="col-span-12 lg:col-span-7 flex flex-col min-h-0 panel relative pb-16 bg-slate-50/40">
-          <div className="h-9 px-3.5 border-b border-slate-100 flex items-center justify-between bg-white/90 z-20 shrink-0">
-            <div className="flex items-center gap-2">
+        <section className="col-span-12 lg:col-span-7 flex flex-col min-h-[460px] lg:min-h-0 panel rounded-3xl relative pb-16 overflow-hidden">
+          <div className="h-10 px-4 border-b border-slate-200/50 flex items-center justify-between bg-white/55 backdrop-blur-md z-20 shrink-0">
+            <div className="flex items-center gap-2.5">
               <Sparkles className="w-4 h-4 text-indigo-600" />
-              <button
-                onClick={() => setActiveRightTab("visualizer")}
-                className={`text-xs font-bold px-2 py-1 rounded transition-colors ${
-                  activeRightTab === "visualizer"
-                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Array Visualizer
-              </button>
-              <button
-                onClick={() => setActiveRightTab("panels")}
-                className={`text-xs font-bold px-2 py-1 rounded transition-colors flex items-center gap-1 ${
-                  activeRightTab === "panels"
-                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Layers className="w-3 h-3" />
-                <span>Call Stack & Variables</span>
-              </button>
+              <div className="flex items-center p-0.5 rounded-full glass-capsule-track gap-0.5">
+                <button
+                  onClick={() => setActiveRightTab("visualizer")}
+                  className={`text-xs font-bold px-3 py-1 rounded-full transition-all cursor-pointer ${
+                    activeRightTab === "visualizer"
+                      ? "glass-capsule-active"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Array Visualizer
+                </button>
+                <button
+                  onClick={() => setActiveRightTab("panels")}
+                  className={`text-xs font-bold px-3 py-1 rounded-full transition-all flex items-center gap-1 cursor-pointer ${
+                    activeRightTab === "panels"
+                      ? "glass-capsule-active"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Layers className="w-3 h-3" />
+                  <span>Call Stack & Variables</span>
+                </button>
+              </div>
               {totalSteps > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50/90 text-emerald-700 border border-emerald-200/80">
                   {totalSteps} Steps Captured
                 </span>
               )}
@@ -859,8 +745,8 @@ export default function Playground() {
           </div>
 
           {/* Current Step Explanation Header */}
-          <div className="m-3 p-3 rounded-xl bg-white border border-indigo-100 shadow-xs flex flex-col gap-1.5 z-20">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+          <div className="m-3 p-3.5 rounded-2xl bg-white/75 backdrop-blur-xl border border-white/90 ring-1 ring-indigo-500/[0.08] shadow-xs flex flex-col gap-1.5 z-20">
+            <div className="flex items-center justify-between border-b border-slate-200/50 pb-1.5">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                 <span className="text-xs font-bold text-slate-800">
@@ -872,7 +758,7 @@ export default function Playground() {
               </div>
 
               {currentStep?.line && (
-                <span className="text-[10px] font-mono text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 font-bold">
+                <span className="text-[10px] font-mono text-indigo-700 bg-indigo-50/90 px-2.5 py-0.5 rounded-full border border-indigo-200/80 font-bold">
                   Line {currentStep.line}
                 </span>
               )}
@@ -886,15 +772,15 @@ export default function Playground() {
 
           {/* Main Visualizer or Variable/CallStack Panels */}
           {activeRightTab === "visualizer" ? (
-            <div className="flex-1 relative rounded-b-xl overflow-hidden bg-white mx-3 mb-2 border border-slate-100 shadow-xs">
+            <div className="flex-1 relative rounded-2xl overflow-hidden bg-white/55 backdrop-blur-md mx-3 mb-2 border border-white/90 ring-1 ring-slate-200/40 shadow-xs">
               <ArrayVisualizer />
             </div>
           ) : (
-            <div className="flex-1 grid grid-cols-2 gap-3 mx-3 mb-2 overflow-hidden">
-              <div className="h-full overflow-hidden">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3 mx-3 mb-2 min-h-[260px] lg:min-h-0 lg:overflow-hidden">
+              <div className="h-full min-h-[200px] overflow-hidden">
                 <VariablesPanel />
               </div>
-              <div className="h-full overflow-hidden">
+              <div className="h-full min-h-[200px] overflow-hidden">
                 <CallStackPanel />
               </div>
             </div>
@@ -904,6 +790,14 @@ export default function Playground() {
           <ExecutionControls />
         </section>
       </div>
+
+      {/* Gemini Socratic Tutor Modal */}
+      <SocraticTutorModal
+        isOpen={isTutorOpen}
+        onClose={() => setIsTutorOpen(false)}
+        overrideCode={code}
+        overrideAlgorithmId={selectedPresetKey}
+      />
     </div>
   );
 }

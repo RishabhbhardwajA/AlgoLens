@@ -45,12 +45,16 @@ export function PanZoomCanvas({
     registerFitView,
   } = useZoomStore();
 
+  const panRef = useRef(pan);
+  panRef.current = pan;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
   const isMouseDownRef = useRef(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const panStartRef = useRef({ x: 0, y: 0 });
   const hasMovedRef = useRef(false);
 
-  // Calculate and apply Fit View: centers content and scales it to fit completely within the container
   const calculateFitView = useCallback(() => {
     const container = containerRef.current;
     const content = contentRef.current;
@@ -71,10 +75,7 @@ export function PanZoomCanvas({
       const scaleX = availWidth / contentWidth;
       const scaleY = availHeight / contentHeight;
       let idealScale = Math.min(scaleX, scaleY);
-
-      // Clamp between minZoom and 1.15 so small content is not overly enlarged
       idealScale = Math.min(1.15, Math.max(minZoom, +idealScale.toFixed(2)));
-
       setZoom(idealScale);
       setPan({ x: 0, y: 0 });
     } else {
@@ -83,17 +84,13 @@ export function PanZoomCanvas({
     }
   }, [fitPadding, minZoom, setPan, setZoom]);
 
-  // Register fitView with the store so ZoomControls triggers it
   useEffect(() => {
     return registerFitView(calculateFitView);
   }, [calculateFitView, registerFitView]);
 
-  // Mouse Drag / Panning
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only primary left-click
-
+    if (e.button !== 0) return;
     const target = e.target as HTMLElement | null;
-    // Don't drag if clicking buttons, inputs, links or non-draggable interactive items
     if (
       target?.closest(
         'button, input, select, textarea, a, [role="button"], [data-no-pan], .nodrag'
@@ -104,10 +101,11 @@ export function PanZoomCanvas({
 
     isMouseDownRef.current = true;
     dragStartRef.current = { x: e.clientX, y: e.clientY };
-    panStartRef.current = { ...pan };
+    panStartRef.current = { ...panRef.current };
     hasMovedRef.current = false;
   };
 
+  // Bind global mouse listeners once (independent of pan pixel updates)
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isMouseDownRef.current) return;
@@ -115,11 +113,9 @@ export function PanZoomCanvas({
       const dx = e.clientX - dragStartRef.current.x;
       const dy = e.clientY - dragStartRef.current.y;
 
-      if (!hasMovedRef.current) {
-        if (Math.hypot(dx, dy) > 3) {
-          hasMovedRef.current = true;
-          setIsDragging(true);
-        }
+      if (!hasMovedRef.current && Math.hypot(dx, dy) > 3) {
+        hasMovedRef.current = true;
+        setIsDragging(true);
       }
 
       if (hasMovedRef.current) {
@@ -144,32 +140,47 @@ export function PanZoomCanvas({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [pan, setIsDragging, setPan]);
+  }, [setIsDragging, setPan]);
 
-  // Touch Support (tablets/mobile)
+  // Attach native non-passive wheel listener for Ctrl/Meta zoom without console warnings
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.12 : -0.12;
+        setZoom(Math.min(maxZoom, Math.max(minZoom, +(zoomRef.current + delta).toFixed(2))));
+      } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        setPan((prev) => ({
+          x: Math.round(prev.x - e.deltaX * 0.7),
+          y: Math.round(prev.y - e.deltaY * 0.7),
+        }));
+      }
+    };
+
+    el.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleNativeWheel);
+  }, [maxZoom, minZoom, setPan, setZoom]);
+
+  // Two-finger / intentional touch pan without hijacking mobile vertical page scroll
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1) return;
-    const target = e.target as HTMLElement | null;
-    if (
-      target?.closest(
-        'button, input, select, textarea, a, [role="button"], [data-no-pan], .nodrag'
-      )
-    ) {
-      return;
-    }
-
-    const touch = e.touches[0];
+    if (e.touches.length !== 2) return;
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
     isMouseDownRef.current = true;
-    dragStartRef.current = { x: touch.clientX, y: touch.clientY };
-    panStartRef.current = { ...pan };
+    dragStartRef.current = { x: midX, y: midY };
+    panStartRef.current = { ...panRef.current };
     hasMovedRef.current = false;
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isMouseDownRef.current || e.touches.length !== 1) return;
-    const touch = e.touches[0];
-    const dx = touch.clientX - dragStartRef.current.x;
-    const dy = touch.clientY - dragStartRef.current.y;
+    if (!isMouseDownRef.current || e.touches.length !== 2) return;
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    const dx = midX - dragStartRef.current.x;
+    const dy = midY - dragStartRef.current.y;
 
     if (!hasMovedRef.current && Math.hypot(dx, dy) > 4) {
       hasMovedRef.current = true;
@@ -189,23 +200,6 @@ export function PanZoomCanvas({
     setIsDragging(false);
   };
 
-  // Wheel Zoom & Pan
-  const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom with ctrl/cmd + wheel or pinch
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 0.12 : -0.12;
-      setZoom(Math.min(maxZoom, Math.max(minZoom, +(zoom + delta).toFixed(2))));
-    } else {
-      // Natural trackpad/wheel pan
-      setPan((prev) => ({
-        x: Math.round(prev.x - e.deltaX * 0.7),
-        y: Math.round(prev.y - e.deltaY * 0.7),
-      }));
-    }
-  };
-
-  // Double click canvas to fit view
   const handleDoubleClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement | null;
     if (
@@ -225,33 +219,26 @@ export function PanZoomCanvas({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      onWheel={handleWheel}
       onDoubleClick={handleDoubleClick}
       className={cn(
-        "relative w-full h-full overflow-hidden select-none flex items-center justify-center",
+        "relative w-full h-full overflow-hidden select-none flex items-center justify-center touch-pan-y",
         isDragging ? "cursor-grabbing" : "cursor-grab",
         className
       )}
       style={{
         backgroundImage: showDotGrid
-          ? "radial-gradient(#cbd5e1 1.2px, transparent 1.2px)"
+          ? "radial-gradient(rgba(99, 102, 241, 0.16) 1.25px, transparent 1.25px)"
           : undefined,
         backgroundSize: "24px 24px",
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
     >
-      {/* Zoom In/Out/Fit controls */}
       {showControls && (
-        <ZoomControls
-          position={controlsPosition}
-          className={controlsClassName}
-        />
+        <ZoomControls position={controlsPosition} className={controlsClassName} />
       )}
 
-      {/* Optional extra controls/legend overlay */}
       {extraControls}
 
-      {/* Movable & Scalable Content Container */}
       <div
         ref={contentRef}
         className={cn(
@@ -261,9 +248,7 @@ export function PanZoomCanvas({
         style={{
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
           transformOrigin: "center center",
-          transition: isDragging
-            ? "none"
-            : "transform 0.22s cubic-bezier(0.2, 0, 0, 1)",
+          transition: isDragging ? "none" : "transform 0.22s cubic-bezier(0.2, 0, 0, 1)",
           willChange: "transform",
           ...contentStyle,
         }}

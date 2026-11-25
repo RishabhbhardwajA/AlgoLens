@@ -2,17 +2,61 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AlgoLens — Interactive DSA Visualization</title>
-    <meta name="description" content="Understand algorithms by watching them execute. Step through DSA algorithms with synchronized code, call stack, variables, and data structure visualization." />
+    <meta name="theme-color" content="#102940" />
+
+    <!-- Favicons & PWA App Icons -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- SEO:START -->
+    <title>AlgoLens — Interactive DSA Visualizer &amp; Step-by-Step Debugger</title>
+    <meta
+      name="description"
+      content="See algorithms think in real-time. Step through Data Structures and Algorithms with synchronized code, live call stacks, Java JDI debugger traces, and visual memory models."
+    />
+    <meta
+      name="keywords"
+      content="DSA visualizer, algorithm visualization, data structures and algorithms, Java JDI trace, binary search visualizer, AlgoLens"
+    />
+    <meta name="author" content="AlgoLens" />
+    <meta name="creator" content="AlgoLens" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AlgoLens" />
+    <meta property="og:title" content="AlgoLens — Interactive DSA Visualizer &amp; Step-by-Step Debugger" />
+    <meta
+      property="og:description"
+      content="See algorithms think in real-time. Step through Data Structures and Algorithms with synchronized code, call stacks, and Java JDI debugger traces."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AlgoLens — Interactive DSA Visualizer" />
+    <meta
+      name="twitter:description"
+      content="Understand algorithms visually with live execution stepping, Java JDI traces, and Big-O benchmarks."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
+    <!-- SEO:END -->
+
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com data: https://cdn.jsdelivr.net; img-src 'self' data: blob:; connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173 https://cdn.jsdelivr.net;"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://lh3.googleusercontent.com https:; connect-src 'self' http://localhost:5000 http://127.0.0.1:5000 ws://localhost:5173 http://localhost:5173 https://cdn.jsdelivr.net;"
     />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <div id="root"></div>

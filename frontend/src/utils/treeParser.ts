@@ -28,8 +28,8 @@ export function parseTreeInput(input: string): TreeNode | null {
     if (part === "null" || part === "") {
       nodes.push(null);
     } else {
+      if (!/^-?\d+$/.test(part)) throw new Error(`Invalid tree value: "${part}" — only integers are supported.`);
       const val = parseInt(part, 10);
-      if (isNaN(val)) throw new Error(`Invalid tree value: "${part}"`);
       nodes.push({ id: `node-${idCounter++}`, value: val, left: null, right: null });
     }
   }

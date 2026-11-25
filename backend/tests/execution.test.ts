@@ -9,9 +9,26 @@ import {
 import { validateEnvironment } from "../src/config/env.js";
 import { executionService } from "../src/services/execution/executionService.js";
 import { MockExecutionProvider } from "../src/services/execution/mockExecutionProvider.js";
+import { userRepository } from "../src/repositories/userRepository.js";
+import { authService } from "../src/services/authService.js";
 
 async function runExecutionTests() {
   console.log("=== STARTING HARDENED MULTI-LANGUAGE EXECUTION & TRACING TESTS ===");
+
+  // Create verified test user + session cookie for protected /execution HTTP calls
+  const testExecUser = userRepository.createUser({
+    name: "Exec Test User",
+    email: `exec_tester_${Date.now()}@example.com`,
+    password_hash: null,
+    is_email_verified: true,
+    auth_provider: "google",
+  });
+  const { token: execToken } = await authService.findOrLinkGoogleAccount({
+    googleId: `exec_gid_${Date.now()}`,
+    email: testExecUser.email,
+    name: testExecUser.name,
+  });
+  const authCookieHeader = `algolens_session=${execToken}`;
 
   // Explicitly inject providers for automated test environment
   executionService.setExecutionProvider(new MockExecutionProvider());
@@ -61,14 +78,24 @@ async function runExecutionTests() {
     testsPassed++;
 
     // -------------------------------------------------------------
-    // Test 2: Validation on Run and Trace Endpoints
+    // Test 2: Validation & Auth Enforcement on Run and Trace Endpoints
     // -------------------------------------------------------------
-    console.log("\n[Test 2] Testing Request Validation...");
+    console.log("\n[Test 2] Testing Request Auth Enforcement & Validation...");
 
-    // Empty payload
-    const badRunRes = await fetch(`${baseUrl}/run`, {
+    // Unauthenticated call must fail with 401 Unauthorized
+    const unauthRunRes = await fetch(`${baseUrl}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ language: "python", sourceCode: "print(1)" }),
+    });
+    if (unauthRunRes.status !== 401) {
+      throw new Error(`Expected 401 for unauthenticated /run request, got ${unauthRunRes.status}`);
+    }
+
+    // Empty payload (authenticated)
+    const badRunRes = await fetch(`${baseUrl}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: authCookieHeader },
       body: JSON.stringify({}),
     });
     if (badRunRes.status !== 400) {
@@ -78,7 +105,7 @@ async function runExecutionTests() {
     // Unsupported language
     const badLangRes = await fetch(`${baseUrl}/run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Cookie: authCookieHeader },
       body: JSON.stringify({ language: "ruby", sourceCode: "puts 'hello'" }),
     });
     if (badLangRes.status !== 400) {
@@ -88,7 +115,7 @@ async function runExecutionTests() {
     // Trace requested on language without trace support (e.g. Python)
     const badTraceRes = await fetch(`${baseUrl}/trace`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Cookie: authCookieHeader },
       body: JSON.stringify({ language: "python", sourceCode: "print(1)" }),
     });
     if (badTraceRes.status !== 400) {
@@ -98,7 +125,7 @@ async function runExecutionTests() {
     if (!badTraceJson.message.includes("does not support Trace mode")) {
       throw new Error("Expected explicit message about lack of Trace mode support");
     }
-    console.log("✓ Request validation, language allowlist, and trace capability enforcement verified.");
+    console.log("✓ Auth gate (401), request validation, language allowlist & trace enforcement verified.");
     testsPassed++;
 
     // -------------------------------------------------------------
@@ -132,7 +159,7 @@ async function runExecutionTests() {
     for (const testCase of runCases) {
       const res = await fetch(`${baseUrl}/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Cookie: authCookieHeader },
         body: JSON.stringify({
           language: testCase.lang,
           sourceCode: testCase.code,
@@ -303,7 +330,17 @@ public class Solution {
       throw new Error(`Expected stack depth of at least 4 during factorial(4), got ${deepestStep}`);
     }
 
-    console.log(`✓ Recursion stack verified: deepest stack depth = ${deepestStep} frames.`);
+    const multiFrameEvent = recTrace.events.find(
+      (e) =>
+        e.stackFrames.length >= 3 &&
+        e.stackFrames[0].localVariables?.n?.value !== undefined &&
+        e.stackFrames[1].localVariables?.n?.value !== undefined
+    );
+    if (!multiFrameEvent) {
+      throw new Error("Expected recursive parent stack frames to preserve their localVariables (n)");
+    }
+
+    console.log(`✓ Recursion stack verified: deepest stack depth = ${deepestStep} frames with per-frame variables.`);
     testsPassed++;
 
     // -------------------------------------------------------------
@@ -404,7 +441,7 @@ public class Solution {
       executionService.setExecutionProvider(null);
       const absentRes = await fetch(`${baseUrl}/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Cookie: authCookieHeader },
         body: JSON.stringify({ language: "python", sourceCode: "print(1)" }),
       });
       if (absentRes.status !== 503) {

@@ -33,7 +33,9 @@ import {
   Weight,
   Layers,
 } from "lucide-react";
-import { playStepTick } from "@/utils/soundEffects";
+import { audioEngine } from "@/engine/audioEngine";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { buildToolJsonLd } from "@/utils/seoSchemas";
 
 // --- Custom Interactive Graph Node ---
 interface CustomGraphNodeData {
@@ -50,33 +52,37 @@ function CustomGraphNode({ data }: { data: CustomGraphNodeData }) {
   const stateColors: Record<string, string> = {
     default: "border-slate-300 bg-white text-slate-700 shadow-xs",
     current:
-      "border-amber-400 bg-amber-50 text-amber-700 shadow-[0_0_20px_rgba(251,191,36,0.6)] ring-2 ring-amber-300",
+      "border-amber-400 bg-amber-50 text-amber-800 shadow-[0_0_20px_rgba(251,191,36,0.6)] ring-2 ring-amber-300",
     visited:
-      "border-emerald-400 bg-emerald-50 text-emerald-700 shadow-[0_0_15px_rgba(52,211,153,0.3)]",
+      "border-emerald-400 bg-emerald-50 text-emerald-800 shadow-[0_0_15px_rgba(52,211,153,0.3)]",
     queued:
-      "border-sky-400 bg-sky-50 text-sky-700 shadow-[0_0_15px_rgba(56,189,248,0.3)]",
+      "border-sky-400 bg-sky-50 text-sky-800 shadow-[0_0_15px_rgba(56,189,248,0.3)]",
     path:
-      "border-violet-500 bg-violet-50 text-violet-800 shadow-[0_0_24px_rgba(139,92,246,0.5)] ring-2 ring-violet-300",
+      "border-violet-500 bg-violet-50 text-violet-900 shadow-[0_0_24px_rgba(139,92,246,0.5)] ring-2 ring-violet-300",
   };
 
   return (
     <div className="relative flex flex-col items-center">
       <Handle
+        id="t-top"
         type="target"
         position={Position.Top}
         className="w-2.5 h-2.5 bg-slate-400 border-2 border-white"
       />
       <Handle
+        id="s-bottom"
         type="source"
         position={Position.Bottom}
         className="w-2.5 h-2.5 bg-slate-400 border-2 border-white"
       />
       <Handle
+        id="t-left"
         type="target"
         position={Position.Left}
         className="w-2.5 h-2.5 bg-slate-400 border-2 border-white"
       />
       <Handle
+        id="s-right"
         type="source"
         position={Position.Right}
         className="w-2.5 h-2.5 bg-slate-400 border-2 border-white"
@@ -84,12 +90,12 @@ function CustomGraphNode({ data }: { data: CustomGraphNodeData }) {
 
       {/* Start / Target Badges */}
       {isStart && (
-        <span className="absolute -top-3 -left-2 px-1.5 py-0.2 rounded-full bg-emerald-500 text-white font-mono text-[9px] font-bold shadow-xs z-10">
+        <span className="absolute -top-3 -left-2 px-1.5 py-0.5 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold shadow-xs z-10">
           S
         </span>
       )}
       {isTarget && (
-        <span className="absolute -top-3 -right-2 px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold shadow-xs z-10">
+        <span className="absolute -top-3 -right-2 px-1.5 py-0.5 rounded-full bg-rose-600 text-white font-mono text-[9px] font-bold shadow-xs z-10">
           T
         </span>
       )}
@@ -103,7 +109,7 @@ function CustomGraphNode({ data }: { data: CustomGraphNodeData }) {
       </div>
 
       {distance !== undefined && distance < Infinity && (
-        <span className="absolute -bottom-5 px-1.5 py-0.2 rounded bg-slate-800 text-white font-mono text-[9px] font-bold shadow-xs">
+        <span className="absolute -bottom-5 px-1.5 py-0.5 rounded bg-slate-800 text-white font-mono text-[9px] font-bold shadow-xs">
           d={distance}
         </span>
       )}
@@ -181,10 +187,25 @@ interface GraphStep {
   activeEdgeId?: string;
   distances?: Record<string, number>;
   path?: string[];
+  pathEdgeIds?: string[];
   explanation: string;
 }
 
 export default function GraphBuilder() {
+  useDocumentMeta({
+    title: "Interactive Graph Builder — BFS, DFS & Dijkstra Visualizer | AlgoLens",
+    description:
+      "Build custom directed and weighted graphs interactively and step through BFS, DFS, and Dijkstra shortest-path algorithms live.",
+    canonicalPath: "/builder",
+    ogImage: "/og/builder.png",
+    jsonLd: buildToolJsonLd(
+      typeof window !== "undefined" ? window.location.origin : "",
+      "/builder",
+      "AlgoLens Interactive Graph & Tree Builder",
+      "Interactive BFS, DFS, and Dijkstra shortest-path visualizer."
+    ),
+  });
+
   const [nodes, setNodes, onNodesChange] = useNodesState(PRESETS.weightedGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(PRESETS.weightedGraph.edges);
 
@@ -193,6 +214,7 @@ export default function GraphBuilder() {
   const [targetNodeId, setTargetNodeId] = useState<string>("F");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const nodeCounterRef = useRef(0);
 
   // Playback execution state
   const [steps, setSteps] = useState<GraphStep[]>([]);
@@ -201,12 +223,13 @@ export default function GraphBuilder() {
   const [playbackSpeed, setPlaybackSpeed] = useState(800);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
 
-  // Synchronize startNodeId if node list changes
+  // Synchronize startNodeId & targetNodeId whenever nodes change (including length === 1)
   useEffect(() => {
-    if (nodes.length > 0 && !nodes.some((n) => n.id === startNodeId)) {
+    if (nodes.length === 0) return;
+    if (!nodes.some((n) => n.id === startNodeId)) {
       setStartNodeId(nodes[0].id);
     }
-    if (nodes.length > 1 && !nodes.some((n) => n.id === targetNodeId)) {
+    if (!nodes.some((n) => n.id === targetNodeId)) {
       setTargetNodeId(nodes[nodes.length - 1].id);
     }
   }, [nodes, startNodeId, targetNodeId]);
@@ -214,11 +237,15 @@ export default function GraphBuilder() {
   // Connect edges by dragging handles
   const onConnect = useCallback(
     (params: Connection) => {
+      if (!params.source || !params.target) return;
       if (params.source === params.target) {
         setErrorNotice("Self-loops are not permitted in simple traversal.");
         return;
       }
       setErrorNotice(null);
+      setIsPlaying(false);
+      setSteps([]);
+      setCurrentStepIdx(0);
       setEdges((eds) =>
         addEdge(
           {
@@ -234,11 +261,20 @@ export default function GraphBuilder() {
     [setEdges]
   );
 
-  // Add a new node to canvas
+  // Add a new node with guaranteed unique ID
   const handleAddNode = () => {
-    const label =
-      String.fromCharCode(65 + (nodes.length % 26)) +
-      (nodes.length >= 26 ? Math.floor(nodes.length / 26) : "");
+    const existingIds = new Set(nodes.map((n) => n.id));
+    let label = "";
+    while (true) {
+      const idx = nodeCounterRef.current++;
+      const candidate =
+        String.fromCharCode(65 + (idx % 26)) + (idx >= 26 ? String(Math.floor(idx / 26)) : "");
+      if (!existingIds.has(candidate)) {
+        label = candidate;
+        break;
+      }
+    }
+
     const newNode: Node = {
       id: label,
       type: "customNode",
@@ -248,12 +284,18 @@ export default function GraphBuilder() {
       },
       data: { label, state: "default" },
     };
+    setIsPlaying(false);
+    setSteps([]);
+    setCurrentStepIdx(0);
     setNodes((nds) => [...nds, newNode]);
     setErrorNotice(null);
   };
 
   // Delete selected node
   const handleDeleteNode = (id: string) => {
+    setIsPlaying(false);
+    setSteps([]);
+    setCurrentStepIdx(0);
     setNodes((nds) => nds.filter((n) => n.id !== id));
     setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
     if (selectedNodeId === id) setSelectedNodeId(null);
@@ -278,13 +320,17 @@ export default function GraphBuilder() {
     );
   };
 
-  // Change weight of an edge
+  // Change weight of an edge (supports 0+)
   const handleChangeEdgeWeight = (edgeId: string, delta: number) => {
+    setIsPlaying(false);
+    setSteps([]);
+    setCurrentStepIdx(0);
     setEdges((eds) =>
       eds.map((edge) => {
         if (edge.id === edgeId) {
-          const currentWeight = parseInt(String(edge.label || "1"), 10) || 1;
-          const newWeight = Math.max(1, currentWeight + delta);
+          const parsed = Number(edge.label);
+          const currentWeight = Number.isFinite(parsed) ? parsed : 1;
+          const newWeight = Math.max(0, currentWeight + delta);
           return { ...edge, label: String(newWeight) };
         }
         return edge;
@@ -298,6 +344,7 @@ export default function GraphBuilder() {
     setSteps([]);
     setCurrentStepIdx(0);
     setErrorNotice(null);
+    nodeCounterRef.current = 0;
     setNodes(PRESETS[key].nodes);
     setEdges(PRESETS[key].edges);
     setStartNodeId(PRESETS[key].nodes[0].id);
@@ -311,6 +358,7 @@ export default function GraphBuilder() {
     setIsPlaying(false);
     setSteps([]);
     setCurrentStepIdx(0);
+    nodeCounterRef.current = 0;
     setNodes([]);
     setEdges([]);
     setErrorNotice(null);
@@ -330,17 +378,27 @@ export default function GraphBuilder() {
       return [];
     }
 
+    if (selectedAlgo === "dijkstra" && !nodes.some((n) => n.id === targetNodeId)) {
+      setErrorNotice("Invalid target node. Please select a valid target node.");
+      return [];
+    }
+
     const adj: Record<string, { to: string; weight: number; edgeId: string }[]> = {};
     nodes.forEach((n) => {
       adj[n.id] = [];
     });
 
-    edges.forEach((e) => {
-      const weight = parseFloat(String(e.label || "1")) || 1;
+    for (const e of edges) {
+      const raw = e.label === undefined || e.label === null || String(e.label).trim() === "" ? 1 : Number(e.label);
+      const weight = Number.isFinite(raw) ? raw : 1;
+      if (selectedAlgo === "dijkstra" && weight < 0) {
+        setErrorNotice("Dijkstra does not support negative edge weights.");
+        return [];
+      }
       if (adj[e.source]) {
         adj[e.source].push({ to: e.target, weight, edgeId: e.id });
       }
-    });
+    }
 
     const generated: GraphStep[] = [];
 
@@ -426,11 +484,13 @@ export default function GraphBuilder() {
     } else if (selectedAlgo === "dijkstra") {
       const dist: Record<string, number> = {};
       const prev: Record<string, string | null> = {};
+      const prevEdge: Record<string, string | null> = {};
       const unvisited = new Set<string>();
 
       nodes.forEach((n) => {
         dist[n.id] = Infinity;
         prev[n.id] = null;
+        prevEdge[n.id] = null;
         unvisited.add(n.id);
       });
       dist[startNodeId] = 0;
@@ -470,10 +530,12 @@ export default function GraphBuilder() {
         const neighbors = adj[current] || [];
         for (const edge of neighbors) {
           if (unvisited.has(edge.to)) {
+            const oldDist = dist[edge.to];
             const newDist = dist[current] + edge.weight;
-            if (newDist < dist[edge.to]) {
+            if (newDist < oldDist) {
               dist[edge.to] = newDist;
               prev[edge.to] = current;
+              prevEdge[edge.to] = edge.edgeId;
 
               generated.push({
                 currentNodeId: current,
@@ -481,7 +543,9 @@ export default function GraphBuilder() {
                 queuedNodes: [],
                 activeEdgeId: edge.edgeId,
                 distances: { ...dist },
-                explanation: `Relaxed edge (${current} → ${edge.to}): updated distance to ${edge.to} from ${dist[edge.to]} to ${newDist}.`,
+                explanation: `Relaxed edge (${current} → ${edge.to}): updated distance to ${edge.to} from ${
+                  oldDist === Infinity ? "∞" : oldDist
+                } to ${newDist}.`,
               });
             }
           }
@@ -489,20 +553,25 @@ export default function GraphBuilder() {
       }
 
       const path: string[] = [];
+      const pathEdgeIds: string[] = [];
       let curr: string | null = targetNodeId;
-      while (curr !== null) {
+      let guard = nodes.length + 1;
+      while (curr != null && guard-- > 0) {
         path.unshift(curr);
-        curr = prev[curr];
+        const edgeId = prevEdge[curr];
+        if (edgeId) pathEdgeIds.unshift(edgeId);
+        curr = prev[curr] ?? null;
       }
 
       const pathFound = path.length > 0 && path[0] === startNodeId;
 
       generated.push({
-        currentNodeId: targetNodeId,
+        currentNodeId: pathFound ? targetNodeId : "",
         visitedNodes: nodes.map((n) => n.id).filter((id) => !unvisited.has(id)),
         queuedNodes: [],
         distances: { ...dist },
         path: pathFound ? path : [],
+        pathEdgeIds: pathFound ? pathEdgeIds : [],
         explanation: pathFound
           ? `Shortest path to ${targetNodeId} found: [${path.join(" → ")}] with total distance ${dist[targetNodeId]}!`
           : `No reachable path from ${startNodeId} to ${targetNodeId}.`,
@@ -524,24 +593,32 @@ export default function GraphBuilder() {
 
   // Sync visualization state to ReactFlow nodes & edges based on current step
   useEffect(() => {
+    const showTarget = selectedAlgo === "dijkstra";
+
     if (steps.length === 0 || currentStepIdx >= steps.length) {
-      // In edit mode: mark start/target nodes
       setNodes((nds) =>
         nds.map((node) => ({
           ...node,
           data: {
             ...node.data,
             isStart: node.id === startNodeId,
-            isTarget: node.id === targetNodeId,
+            isTarget: showTarget && node.id === targetNodeId,
             state: "default",
+            distance: undefined,
           },
+        }))
+      );
+      setEdges((eds) =>
+        eds.map((edge) => ({
+          ...edge,
+          style: { stroke: "#CBD5E1", strokeWidth: 1.5 },
         }))
       );
       return;
     }
 
     const step = steps[currentStepIdx];
-    playStepTick(520);
+    audioEngine.playTick(520);
 
     setNodes((nds) =>
       nds.map((node) => {
@@ -566,7 +643,7 @@ export default function GraphBuilder() {
             state,
             distance,
             isStart: node.id === startNodeId,
-            isTarget: node.id === targetNodeId,
+            isTarget: showTarget && node.id === targetNodeId,
           },
         };
       })
@@ -574,12 +651,15 @@ export default function GraphBuilder() {
 
     setEdges((eds) =>
       eds.map((edge) => {
-        const isPathEdge =
-          step.path &&
-          step.path.some((nodeId, idx) => {
-            if (idx === step.path!.length - 1) return false;
-            return edge.source === nodeId && edge.target === step.path![idx + 1];
-          });
+        const isPathEdge = step.pathEdgeIds
+          ? step.pathEdgeIds.includes(edge.id)
+          : Boolean(
+              step.path &&
+                step.path.some((nodeId, idx) => {
+                  if (idx === step.path!.length - 1) return false;
+                  return edge.source === nodeId && edge.target === step.path![idx + 1];
+                })
+            );
 
         const isActive = edge.id === step.activeEdgeId;
 
@@ -592,20 +672,21 @@ export default function GraphBuilder() {
         };
       })
     );
-  }, [steps, currentStepIdx, setNodes, setEdges, startNodeId, targetNodeId]);
+  }, [steps, currentStepIdx, setNodes, setEdges, startNodeId, targetNodeId, selectedAlgo]);
 
-  // Autoplay ticker
+  // Stop autoplay cleanly when reaching last step
   useEffect(() => {
-    if (!isPlaying) return;
+    if (isPlaying && steps.length > 0 && currentStepIdx >= steps.length - 1) {
+      setIsPlaying(false);
+    }
+  }, [isPlaying, currentStepIdx, steps.length]);
+
+  // Autoplay ticker (pure updater)
+  useEffect(() => {
+    if (!isPlaying || steps.length <= 1) return;
 
     const timer = setInterval(() => {
-      setCurrentStepIdx((idx) => {
-        if (idx >= steps.length - 1) {
-          setIsPlaying(false);
-          return idx;
-        }
-        return idx + 1;
-      });
+      setCurrentStepIdx((idx) => (idx >= steps.length - 1 ? idx : idx + 1));
     }, playbackSpeed);
 
     return () => clearInterval(timer);
@@ -614,73 +695,80 @@ export default function GraphBuilder() {
   const activeStep = steps[currentStepIdx];
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] bg-transparent overflow-hidden font-sans">
+    <div className="flex flex-col min-h-[calc(100vh-56px)] lg:h-[calc(100vh-56px)] bg-transparent overflow-y-auto lg:overflow-hidden font-sans">
       {/* Top Banner & Control HUD */}
       <div
-        className="flex items-center justify-between px-6 py-2.5 border-b z-10 shrink-0 h-14"
+        className="flex flex-wrap items-center justify-between gap-2.5 px-3 sm:px-6 py-2.5 border-b z-10 shrink-0 min-h-14"
         style={{
-          background: "rgba(255, 255, 255, 0.85)",
-          backdropFilter: "blur(16px)",
-          borderColor: "rgba(226, 232, 240, 0.8)",
+          background: "rgba(255, 255, 255, 0.72)",
+          backdropFilter: "blur(20px) saturate(165%)",
+          WebkitBackdropFilter: "blur(20px) saturate(165%)",
+          borderColor: "rgba(255, 255, 255, 0.85)",
+          boxShadow: "0 1px 0 rgba(99, 102, 241, 0.06)",
         }}
       >
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white shadow-xs">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20 shrink-0">
             <GitFork className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold text-slate-900 tracking-tight">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-sm font-bold text-slate-900 tracking-tight truncate">
                 Interactive Graph & Tree Builder
               </h1>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+              <span className="hidden sm:inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-violet-50/90 text-violet-700 border border-violet-200/80 whitespace-nowrap">
                 Custom Canvas
               </span>
             </div>
-            <p className="text-[11px] text-slate-500">
+            <p className="hidden sm:block text-[11px] text-slate-600">
               Draw custom nodes and edges, then run BFS, DFS, or Dijkstra live.
             </p>
           </div>
         </div>
 
         {/* Toolbar & Algorithm Chooser */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Preset Buttons */}
-          <div className="flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-xs">
+          <div className="flex items-center p-1 rounded-full glass-capsule-track text-xs overflow-x-auto max-w-full">
             <button
+              type="button"
               onClick={() => handleLoadPreset("weightedGraph")}
-              className="px-2 py-1 rounded-md text-slate-600 hover:text-slate-900 font-medium"
+              className="px-2.5 py-1 rounded-full text-slate-700 hover:text-indigo-700 hover:bg-white/80 font-medium transition-all cursor-pointer whitespace-nowrap"
             >
               Weighted Graph
             </button>
             <button
+              type="button"
               onClick={() => handleLoadPreset("binaryTree")}
-              className="px-2 py-1 rounded-md text-slate-600 hover:text-slate-900 font-medium"
+              className="px-2.5 py-1 rounded-full text-slate-700 hover:text-indigo-700 hover:bg-white/80 font-medium transition-all cursor-pointer whitespace-nowrap"
             >
               Binary Tree
             </button>
             <button
+              type="button"
               onClick={() => handleLoadPreset("cycleGraph")}
-              className="px-2 py-1 rounded-md text-slate-600 hover:text-slate-900 font-medium"
+              className="px-2.5 py-1 rounded-full text-slate-700 hover:text-indigo-700 hover:bg-white/80 font-medium transition-all cursor-pointer whitespace-nowrap"
             >
               Cycle
             </button>
           </div>
 
           {/* Algorithm Picker */}
-          <div className="flex items-center p-0.5 rounded-lg bg-slate-100 border border-slate-200 text-xs">
+          <div className="flex items-center p-1 rounded-full glass-capsule-track text-xs">
             {(["bfs", "dfs", "dijkstra"] as const).map((algo) => (
               <button
+                type="button"
                 key={algo}
                 onClick={() => {
+                  setIsPlaying(false);
                   setSelectedAlgo(algo);
                   setSteps([]);
                   setCurrentStepIdx(0);
                 }}
-                className={`px-2.5 py-1 rounded-md uppercase font-bold text-[11px] transition-all ${
+                className={`px-3 py-1 rounded-full uppercase font-bold text-[11px] transition-all cursor-pointer ${
                   selectedAlgo === algo
-                    ? "bg-white text-violet-700 shadow-xs"
-                    : "text-slate-500 hover:text-slate-700"
+                    ? "glass-capsule-active text-violet-700"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 {algo}
@@ -689,12 +777,18 @@ export default function GraphBuilder() {
           </div>
 
           {/* Start / Target Pickers */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-600">
+          <div className="flex items-center gap-1.5 text-xs text-slate-700">
             <span className="font-semibold text-[11px]">Start:</span>
             <select
               value={startNodeId}
-              onChange={(e) => setStartNodeId(e.target.value)}
-              className="px-1.5 py-1 rounded-md border border-slate-200 bg-white font-mono font-bold text-xs"
+              aria-label="Start node"
+              onChange={(e) => {
+                setIsPlaying(false);
+                setSteps([]);
+                setCurrentStepIdx(0);
+                setStartNodeId(e.target.value);
+              }}
+              className="px-2.5 py-1 rounded-full glass-input font-mono font-bold text-xs outline-none cursor-pointer"
             >
               {nodes.map((n) => (
                 <option key={n.id} value={n.id}>
@@ -708,8 +802,14 @@ export default function GraphBuilder() {
                 <span className="font-semibold text-[11px] ml-1">Target:</span>
                 <select
                   value={targetNodeId}
-                  onChange={(e) => setTargetNodeId(e.target.value)}
-                  className="px-1.5 py-1 rounded-md border border-slate-200 bg-white font-mono font-bold text-xs"
+                  aria-label="Target node"
+                  onChange={(e) => {
+                    setIsPlaying(false);
+                    setSteps([]);
+                    setCurrentStepIdx(0);
+                    setTargetNodeId(e.target.value);
+                  }}
+                  className="px-2.5 py-1 rounded-full glass-input font-mono font-bold text-xs outline-none cursor-pointer"
                 >
                   {nodes.map((n) => (
                     <option key={n.id} value={n.id}>
@@ -723,16 +823,18 @@ export default function GraphBuilder() {
 
           {/* Action Buttons */}
           <button
+            type="button"
             onClick={handleAddNode}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition-colors"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-white/90 ring-1 ring-slate-200/70 bg-white/80 hover:bg-white text-slate-700 text-xs font-semibold backdrop-blur-md shadow-xs transition-all cursor-pointer whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5 text-indigo-600" />
             <span>Add Node</span>
           </button>
 
           <button
+            type="button"
             onClick={handleRunAlgorithm}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold shadow-md shadow-violet-600/20 transition-all"
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:opacity-95 text-white text-xs font-bold shadow-md shadow-violet-600/25 transition-all cursor-pointer whitespace-nowrap"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>Run {selectedAlgo.toUpperCase()}</span>
@@ -741,11 +843,11 @@ export default function GraphBuilder() {
       </div>
 
       {/* Main Builder & Canvas Area */}
-      <div className="flex-1 grid grid-cols-12 gap-3 p-3 overflow-hidden">
+      <div className="flex-1 grid grid-cols-12 gap-3 p-3 lg:overflow-hidden">
         {/* Canvas Center (9 Cols) */}
-        <div className="col-span-12 lg:col-span-9 panel flex flex-col relative overflow-hidden bg-white">
+        <div className="col-span-12 lg:col-span-9 panel rounded-3xl flex flex-col relative overflow-hidden min-h-[420px] lg:min-h-0">
           {/* Canvas Top Bar */}
-          <div className="h-9 px-3.5 border-b border-slate-100 flex items-center justify-between bg-white/90 z-20 shrink-0">
+          <div className="h-10 px-4 border-b border-slate-200/50 flex items-center justify-between bg-white/55 backdrop-blur-md z-20 shrink-0">
             <div className="flex items-center gap-3 text-xs font-semibold text-slate-700">
               <span className="flex items-center gap-1.5">
                 <Route className="w-4 h-4 text-violet-600" />
@@ -753,7 +855,7 @@ export default function GraphBuilder() {
               </span>
 
               {/* Quick Metrics */}
-              <span className="text-[11px] font-mono text-slate-400">
+              <span className="text-[11px] font-mono text-slate-500 px-2.5 py-0.5 rounded-full bg-white/75 border border-white/90">
                 |V| = {nodes.length} &nbsp;|&nbsp; |E| = {edges.length}
               </span>
             </div>
@@ -761,7 +863,7 @@ export default function GraphBuilder() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCircularLayout}
-                className="px-2 py-1 rounded bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-medium flex items-center gap-1"
+                className="px-3 py-1 rounded-full bg-white/75 hover:bg-white border border-white/90 ring-1 ring-slate-200/60 text-slate-600 text-[11px] font-medium flex items-center gap-1 transition-all cursor-pointer"
                 title="Arrange nodes in a circular layout"
               >
                 <CircleDot className="w-3 h-3 text-indigo-600" />
@@ -770,7 +872,7 @@ export default function GraphBuilder() {
 
               <button
                 onClick={handleClear}
-                className="text-[11px] text-slate-400 hover:text-rose-600 flex items-center gap-1 font-medium transition-colors ml-1"
+                className="text-[11px] text-slate-500 hover:text-rose-600 hover:bg-rose-50/75 px-2.5 py-1 rounded-full flex items-center gap-1 font-medium transition-colors ml-1 cursor-pointer"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Clear</span>
@@ -780,14 +882,14 @@ export default function GraphBuilder() {
 
           {/* Context Action Bar when a Node is Clicked */}
           {selectedNodeId && (
-            <div className="absolute top-11 left-4 z-30 flex items-center gap-1.5 p-1.5 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-indigo-100 text-xs">
+            <div className="absolute top-12 left-4 z-30 flex items-center gap-1.5 p-1.5 bg-white/88 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/95 ring-1 ring-indigo-500/10 text-xs">
               <span className="font-bold text-slate-700 px-2">Node {selectedNodeId}:</span>
               <button
                 onClick={() => {
                   setStartNodeId(selectedNodeId);
                   setSelectedNodeId(null);
                 }}
-                className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-[11px] transition-colors"
+                className="px-2.5 py-1 rounded-full bg-emerald-50/90 hover:bg-emerald-100 text-emerald-800 font-semibold text-[11px] transition-colors cursor-pointer"
               >
                 Set as Start (S)
               </button>
@@ -796,13 +898,13 @@ export default function GraphBuilder() {
                   setTargetNodeId(selectedNodeId);
                   setSelectedNodeId(null);
                 }}
-                className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 font-semibold text-[11px] transition-colors"
+                className="px-2.5 py-1 rounded-full bg-rose-50/90 hover:bg-rose-100 text-rose-800 font-semibold text-[11px] transition-colors cursor-pointer"
               >
                 Set as Target (T)
               </button>
               <button
                 onClick={() => handleDeleteNode(selectedNodeId)}
-                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-[11px] transition-colors flex items-center gap-1"
+                className="px-2.5 py-1 rounded-full bg-slate-100/80 hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Delete</span>
@@ -812,14 +914,14 @@ export default function GraphBuilder() {
 
           {/* Context Action Bar when an Edge is Clicked */}
           {selectedEdgeId && (
-            <div className="absolute top-11 right-4 z-30 flex items-center gap-1.5 p-1.5 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-indigo-100 text-xs">
+            <div className="absolute top-12 right-4 z-30 flex items-center gap-1.5 p-1.5 bg-white/88 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/95 ring-1 ring-indigo-500/10 text-xs">
               <span className="font-bold text-slate-700 px-2 flex items-center gap-1">
                 <Weight className="w-3 h-3 text-indigo-600" />
                 Edge Weight:
               </span>
               <button
                 onClick={() => handleChangeEdgeWeight(selectedEdgeId, -1)}
-                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs"
+                className="w-6 h-6 rounded-full bg-slate-100/90 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
               >
                 -
               </button>
@@ -828,7 +930,7 @@ export default function GraphBuilder() {
               </span>
               <button
                 onClick={() => handleChangeEdgeWeight(selectedEdgeId, 1)}
-                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs"
+                className="w-6 h-6 rounded-full bg-slate-100/90 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
               >
                 +
               </button>
@@ -837,7 +939,7 @@ export default function GraphBuilder() {
                   setEdges((eds) => eds.filter((e) => e.id !== selectedEdgeId));
                   setSelectedEdgeId(null);
                 }}
-                className="ml-2 text-rose-600 hover:underline text-[11px]"
+                className="ml-2 text-rose-600 hover:underline text-[11px] pr-1 cursor-pointer"
               >
                 Delete Edge
               </button>
@@ -846,14 +948,15 @@ export default function GraphBuilder() {
 
           {/* Error Notice Banner */}
           {errorNotice && (
-            <div className="absolute top-12 left-4 right-4 z-30 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center justify-between shadow-xs">
+            <div className="absolute top-12 left-4 right-4 z-30 p-3 rounded-2xl bg-amber-50/95 backdrop-blur-xl border border-amber-200/80 text-xs text-amber-800 flex items-center justify-between shadow-lg">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>{errorNotice}</span>
               </div>
               <button
+                type="button"
                 onClick={() => setErrorNotice(null)}
-                className="text-[11px] text-amber-600 font-bold hover:underline"
+                className="text-[11px] text-amber-800 font-bold hover:underline cursor-pointer"
               >
                 Dismiss
               </button>
@@ -861,7 +964,7 @@ export default function GraphBuilder() {
           )}
 
           {/* ReactFlow Canvas */}
-          <div className="flex-1 relative">
+          <div className="flex-1 relative bg-white/45 min-h-[300px]">
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -879,18 +982,20 @@ export default function GraphBuilder() {
               nodeTypes={nodeTypes}
               fitView
             >
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#E2E8F0" />
-              <Controls position="top-left" />
+              <Background variant={BackgroundVariant.Dots} gap={18} size={1.2} color="rgba(99, 102, 241, 0.22)" />
+              <Controls position="bottom-left" />
             </ReactFlow>
           </div>
 
           {/* Playback Controls Footer */}
           {steps.length > 0 && (
-            <div className="h-14 px-4 border-t border-slate-100 bg-white/95 flex items-center justify-between z-20 shrink-0">
+            <div className="min-h-14 px-3 sm:px-4 py-2 border-t border-slate-200/50 bg-white/78 backdrop-blur-xl flex flex-wrap items-center justify-between gap-2 z-20 shrink-0">
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-8 h-8 rounded-lg bg-violet-600 hover:bg-violet-700 text-white flex items-center justify-center shadow-xs transition-colors"
+                  aria-label={isPlaying ? "Pause traversal" : "Play traversal"}
+                  className="w-8 h-8 rounded-full bg-gradient-to-tr from-violet-600 to-indigo-600 hover:opacity-95 text-white flex items-center justify-center shadow-md shadow-indigo-500/25 transition-all cursor-pointer"
                 >
                   {isPlaying ? (
                     <Pause className="w-3.5 h-3.5 fill-current" />
@@ -900,33 +1005,37 @@ export default function GraphBuilder() {
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setIsPlaying(false);
                     setCurrentStepIdx((i) => Math.max(0, i - 1));
                   }}
                   disabled={currentStepIdx === 0}
-                  className="px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  className="px-3 py-1 rounded-full border border-white/90 ring-1 ring-slate-200/70 bg-white/80 text-xs text-slate-700 hover:bg-white disabled:opacity-40 transition-all cursor-pointer"
                 >
                   Prev
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setIsPlaying(false);
                     setCurrentStepIdx((i) => Math.min(steps.length - 1, i + 1));
                   }}
                   disabled={currentStepIdx >= steps.length - 1}
-                  className="px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  className="px-3 py-1 rounded-full border border-white/90 ring-1 ring-slate-200/70 bg-white/80 text-xs text-slate-700 hover:bg-white disabled:opacity-40 transition-all cursor-pointer"
                 >
                   Next
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     setIsPlaying(false);
                     setCurrentStepIdx(0);
                   }}
-                  className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600"
+                  aria-label="Reset to start"
+                  className="p-1.5 rounded-full hover:bg-white/80 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
                   title="Reset to Start"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -934,9 +1043,10 @@ export default function GraphBuilder() {
               </div>
 
               {/* Scrubber */}
-              <div className="flex-1 max-w-sm mx-6 flex items-center gap-2">
+              <div className="flex-1 min-w-[140px] max-w-sm mx-2 sm:mx-6 flex items-center gap-2">
                 <input
                   type="range"
+                  aria-label="Graph playback step"
                   min={0}
                   max={steps.length - 1}
                   value={currentStepIdx}
@@ -944,20 +1054,21 @@ export default function GraphBuilder() {
                     setIsPlaying(false);
                     setCurrentStepIdx(Number(e.target.value));
                   }}
-                  className="w-full accent-violet-600 cursor-pointer"
+                  className="w-full accent-indigo-600 cursor-pointer"
                 />
-                <span className="text-[11px] font-mono text-slate-400 shrink-0">
+                <span className="text-[11px] font-mono text-slate-600 font-semibold shrink-0">
                   {currentStepIdx + 1}/{steps.length}
                 </span>
               </div>
 
               {/* Speed Controller */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-mono">
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 font-mono shrink-0">
                 <span>Speed:</span>
                 <select
+                  aria-label="Graph playback speed"
                   value={playbackSpeed}
                   onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
-                  className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-slate-50"
+                  className="rounded-full glass-input px-2.5 py-0.5 text-xs outline-none cursor-pointer"
                 >
                   <option value={1400}>0.5x</option>
                   <option value={800}>1.0x</option>
@@ -971,7 +1082,7 @@ export default function GraphBuilder() {
         {/* Right Telemetry Stack (3 Cols) */}
         <aside className="col-span-12 lg:col-span-3 flex flex-col gap-3 min-h-0">
           {/* Step Explanation Card */}
-          <div className="panel p-4 flex flex-col gap-2 shrink-0 bg-white">
+          <div className="panel rounded-3xl p-4 flex flex-col gap-2 shrink-0">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
               <Sparkles className="w-3.5 h-3.5 text-violet-600" />
               <span>Step Explanation</span>
@@ -983,10 +1094,10 @@ export default function GraphBuilder() {
           </div>
 
           {/* Graph State Telemetry */}
-          <div className="flex-1 panel p-4 flex flex-col gap-3 bg-white overflow-y-auto">
-            <div className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center justify-between">
+          <div className="flex-1 panel rounded-3xl p-4 flex flex-col gap-3 overflow-y-auto">
+            <div className="font-bold text-xs text-slate-800 border-b border-slate-200/50 pb-2 flex items-center justify-between">
               <span>Execution Telemetry</span>
-              <span className="text-[10px] font-mono text-slate-400">
+              <span className="text-[10px] font-mono text-indigo-600 px-2 py-0.5 rounded-full bg-indigo-50/80">
                 {selectedAlgo.toUpperCase()}
               </span>
             </div>
@@ -1024,7 +1135,7 @@ export default function GraphBuilder() {
                     activeStep.visitedNodes.map((id) => (
                       <span
                         key={id}
-                        className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        className="px-2 py-0.5 rounded-full bg-emerald-50/90 text-emerald-700 border border-emerald-200/80"
                       >
                         {id}
                       </span>
@@ -1042,7 +1153,7 @@ export default function GraphBuilder() {
                   {activeStep.queuedNodes.map((id, idx) => (
                     <span
                       key={idx}
-                      className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200"
+                      className="px-2 py-0.5 rounded-full bg-sky-50/90 text-sky-700 border border-sky-200/80"
                     >
                       {id}
                     </span>
@@ -1053,7 +1164,7 @@ export default function GraphBuilder() {
 
             {/* Shortest Path Result */}
             {activeStep?.path && activeStep.path.length > 0 && (
-              <div className="p-3 rounded-xl bg-violet-50 border border-violet-200 text-xs flex flex-col gap-1">
+              <div className="p-3 rounded-2xl bg-violet-50/75 backdrop-blur-md border border-violet-200/70 text-xs flex flex-col gap-1">
                 <span className="font-bold text-violet-800 text-[11px]">
                   Optimal Shortest Path:
                 </span>
@@ -1069,11 +1180,11 @@ export default function GraphBuilder() {
                 <span className="font-semibold text-slate-500 text-[11px]">
                   Distance Table:
                 </span>
-                <div className="grid grid-cols-3 gap-1 font-mono text-[11px]">
+                <div className="grid grid-cols-3 gap-1.5 font-mono text-[11px]">
                   {Object.entries(activeStep.distances).map(([nodeId, d]) => (
                     <div
                       key={nodeId}
-                      className="p-1 rounded bg-slate-50 border border-slate-200 text-center"
+                      className="p-1.5 rounded-xl bg-white/70 border border-white/90 ring-1 ring-slate-200/60 text-center"
                     >
                       <span className="text-slate-500">{nodeId}:</span>{" "}
                       <span className="font-bold text-slate-800">

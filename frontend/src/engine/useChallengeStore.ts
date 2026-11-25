@@ -13,6 +13,7 @@ interface ChallengeState {
   userAnswer: {
     selectedIndex: number;
     isCorrect: boolean;
+    xpEarned: number;
   } | null;
 
   // Actions
@@ -22,6 +23,7 @@ interface ChallengeState {
   submitAnswer: (selectedIndex: number) => { isCorrect: boolean; xpEarned: number };
   skipChallenge: (stepIndex?: number) => void;
   dismissChallenge: () => void;
+  resetForAlgorithmSwitch: () => void;
   resetStats: () => void;
 }
 
@@ -68,7 +70,7 @@ export const useChallengeStore = create<ChallengeState>((set, get) => ({
     const xpEarned = isCorrect ? activeChallenge.xp + bonus : 0;
 
     set({
-      userAnswer: { selectedIndex, isCorrect },
+      userAnswer: { selectedIndex, isCorrect, xpEarned },
       score: score + xpEarned,
       streak: newStreak,
       highestStreak: Math.max(highestStreak, newStreak),
@@ -92,6 +94,14 @@ export const useChallengeStore = create<ChallengeState>((set, get) => ({
 
   dismissChallenge: () => {
     set({ activeChallenge: null, userAnswer: null });
+  },
+
+  resetForAlgorithmSwitch: () => {
+    set({
+      activeChallenge: null,
+      userAnswer: null,
+      skippedStepIndices: [],
+    });
   },
 
   resetStats: () => {

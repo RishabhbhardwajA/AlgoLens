@@ -17,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const DEFAULT_JAVA_LIMITATIONS = [
-  "Captured up to 500 source line and return events",
+  "Captured up to 2,000 source line and return events",
   "Arrays serialized up to 50 elements",
   "Strings truncated at 256 characters",
   "Stack frame depth limited to 15 frames",
@@ -140,7 +140,7 @@ export class RemoteJavaTraceDispatcher implements TraceProvider {
         body: JSON.stringify({
           language: "java",
           sourceCode: request.sourceCode,
-          maxSteps: Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500),
+          maxSteps: Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 2000),
           timeoutMs: Math.min(timeoutMs, 10000),
         }),
         signal: controller.signal,
@@ -331,7 +331,7 @@ export class LocalJavaTraceExecutor implements TraceProvider {
         };
       }
 
-      const maxSteps = Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 500);
+      const maxSteps = Math.min(request.maxSteps || request.maxEvents || this.defaultMaxSteps, 2000);
       const traceOutput = await this.runTracer(sandboxDir, className, maxSteps, timeoutMs);
       return traceOutput;
     } catch (err: any) {

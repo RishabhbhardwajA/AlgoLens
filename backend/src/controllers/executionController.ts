@@ -1,61 +1,40 @@
 import type { Request, Response, NextFunction } from "express";
 import { executionService } from "../services/execution/executionService.js";
 import { resolveLanguage } from "../services/execution/languageRegistry.js";
+import { sendSuccess, sendError } from "../utils/apiResponse.js";
+import type { ExecutionValidatedRequest } from "../validators/executionValidators.js";
 
 export const executionController = {
   getCapabilities(_req: Request, res: Response) {
     const capabilities = executionService.getCapabilities();
-    return res.json({
-      success: true,
+    return sendSuccess(res, {
       languages: capabilities,
       runAvailable: executionService.isRunAvailable(),
     });
   },
 
-  async run(req: Request, res: Response, next: NextFunction) {
+  async run(req: ExecutionValidatedRequest, res: Response, next: NextFunction) {
     try {
       if (!executionService.isRunAvailable()) {
-        return res.status(503).json({
-          error: "Execution Provider Unavailable",
-          message:
-            "Code execution is currently unavailable. An execution provider (e.g. Judge0) is not configured in this environment.",
-          status: "INTERNAL_ERROR",
-          stdout: "",
-          stderr: "Service Unavailable: No execution provider configured.",
-          compileOutput: "",
-          exitCode: 1,
-        });
+        return sendError(
+          res,
+          "Execution Provider Unavailable",
+          "Code execution is currently unavailable. An execution provider (e.g. Judge0) is not configured in this environment.",
+          503,
+          {
+            status: "INTERNAL_ERROR",
+            stdout: "",
+            stderr: "Service Unavailable: No execution provider configured.",
+            compileOutput: "",
+            exitCode: 1,
+          }
+        );
       }
 
       const { language, sourceCode, stdin, cpuTimeLimitSec, memoryLimitKb } = req.body;
-
-      if (!language || typeof language !== "string") {
-        return res.status(400).json({
-          error: "Validation Error",
-          message: "Field 'language' is required and must be a string.",
-        });
-      }
-
-      if (!sourceCode || typeof sourceCode !== "string" || sourceCode.trim().length === 0) {
-        return res.status(400).json({
-          error: "Validation Error",
-          message: "Field 'sourceCode' is required and cannot be empty.",
-        });
-      }
-
-      if (sourceCode.length > 32 * 1024) {
-        return res.status(400).json({
-          error: "Payload Too Large",
-          message: "Source code exceeds the maximum allowed size of 32KB.",
-        });
-      }
-
-      const langConfig = resolveLanguage(language);
+      const langConfig = req.resolvedLanguageConfig || resolveLanguage(language);
       if (!langConfig) {
-        return res.status(400).json({
-          error: "Unsupported Language",
-          message: `Language '${language}' is not supported for execution. Supported languages: java, python, cpp, javascript.`,
-        });
+        return sendError(res, "Unsupported Language", `Language '${language}' is not supported.`, 400);
       }
 
       const boundedCpuLimit = Math.min(
@@ -81,48 +60,15 @@ export const executionController = {
     }
   },
 
-  async trace(req: Request, res: Response, next: NextFunction) {
+  async trace(req: ExecutionValidatedRequest, res: Response, next: NextFunction) {
     try {
       const { language, sourceCode, maxSteps, timeoutMs } = req.body;
-
-      if (!language || typeof language !== "string") {
-        return res.status(400).json({
-          error: "Validation Error",
-          message: "Field 'language' is required and must be a string.",
-        });
-      }
-
-      if (!sourceCode || typeof sourceCode !== "string" || sourceCode.trim().length === 0) {
-        return res.status(400).json({
-          error: "Validation Error",
-          message: "Field 'sourceCode' is required and cannot be empty.",
-        });
-      }
-
-      if (sourceCode.length > 32 * 1024) {
-        return res.status(400).json({
-          error: "Payload Too Large",
-          message: "Source code exceeds the maximum allowed size of 32KB.",
-        });
-      }
-
-      const langConfig = resolveLanguage(language);
+      const langConfig = req.resolvedLanguageConfig || resolveLanguage(language);
       if (!langConfig) {
-        return res.status(400).json({
-          error: "Unsupported Language",
-          message: `Language '${language}' is not recognized. Trace is currently available for: java.`,
-        });
+        return sendError(res, "Unsupported Language", `Language '${language}' is not recognized.`, 400);
       }
 
-      if (!langConfig.supportsTrace) {
-        return res.status(400).json({
-          error: "Trace Not Supported",
-          message: `Language '${language}' does not support Trace mode. Trace is currently supported for Java.`,
-          limitations: langConfig.limitations,
-        });
-      }
-
-      const boundedSteps = Math.min(typeof maxSteps === "number" ? maxSteps : 500, 500);
+      const boundedSteps = Math.min(typeof maxSteps === "number" ? maxSteps : 500, 2000);
       const boundedTimeout = Math.min(typeof timeoutMs === "number" ? timeoutMs : 6000, 10000);
 
       const traceResult = await executionService.traceCode({

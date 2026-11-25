@@ -47,7 +47,7 @@ app.post("/trace", async (req: Request, res: Response) => {
     });
   }
 
-  const boundedSteps = Math.min(typeof maxSteps === "number" ? maxSteps : 500, 500);
+  const boundedSteps = Math.min(typeof maxSteps === "number" ? maxSteps : 500, 2000);
   const boundedTimeout = Math.min(typeof timeoutMs === "number" ? timeoutMs : 6000, 10000);
 
   const traceReq: TraceRequest = {

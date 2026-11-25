@@ -19,7 +19,7 @@ export const SUPPORTED_LANGUAGES: SupportedLanguageConfig[] = [
     supportsTrace: true,
     limitations: [
       "Tracer requires class Solution with public static void main(String[] args)",
-      "Infinite recursion or execution > 500 steps will be truncated",
+      "Infinite recursion or execution > 2000 steps will be truncated",
       "Network calls and raw file system modifications are strictly blocked in sandbox",
     ],
     defaultBoilerplate: `public class Solution {

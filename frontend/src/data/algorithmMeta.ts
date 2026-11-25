@@ -283,8 +283,6 @@ export const CATEGORIES: AlgorithmCategory[] = [
   "Trees",
   "Recursion",
   "Linked List",
-  "Stack",
-  "Queue",
   "Graphs",
   "Dynamic Programming",
 ];

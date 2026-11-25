@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import authRoutes from "./authRoutes.js";
 import userRoutes from "./userRoutes.js";
 import executionRoutes from "./executionRoutes.js";
+import geminiRoutes from "./geminiRoutes.js";
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.get("/health", (_req: Request, res: Response) => {
 router.use("/auth", authRoutes);
 router.use("/user", userRoutes);
 router.use("/execution", executionRoutes);
+router.use("/gemini", geminiRoutes);
 
 export default router;

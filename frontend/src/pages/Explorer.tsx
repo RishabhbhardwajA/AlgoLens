@@ -1,16 +1,63 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { AlgorithmCard } from "@/components/AlgorithmCard/AlgorithmCard";
 import { ALGORITHM_META, CATEGORIES, type AlgorithmMeta } from "@/data/algorithmMeta";
 import { Search } from "lucide-react";
 import type { AlgorithmCategory, Difficulty } from "@/engine/executionTypes";
 import { cn } from "@/utils/cn";
+import { Footer } from "@/components/Footer/Footer";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
+import { buildExplorerJsonLd } from "@/utils/seoSchemas";
 
 const DIFFICULTIES: Difficulty[] = ["Easy", "Medium", "Hard"];
 
 export default function Explorer() {
-  const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<AlgorithmCategory | "All">("All");
+  const [searchParams, setSearchParams] = useSearchParams();
+  useDocumentMeta({
+    title: `Algorithm Explorer — ${ALGORITHM_META.length} Interactive DSA Visualizers | AlgoLens`,
+    description:
+      "Browse interactive algorithm visualizers across Arrays, Two Pointers, Sorting, Binary Trees, Recursion, Linked Lists, Graphs, and Dynamic Programming.",
+    keywords: [
+      "algorithm explorer",
+      "DSA visualizer library",
+      "binary search",
+      "merge sort",
+      "tree traversal",
+      "BFS",
+    ],
+    canonicalPath: "/explore",
+    ogImage: "/og/explore.png",
+    jsonLd: buildExplorerJsonLd(typeof window !== "undefined" ? window.location.origin : ""),
+  });
+
+  const initialQuery = searchParams.get("q") ?? "";
+  const rawCat = searchParams.get("category");
+  const initialCategory: AlgorithmCategory | "All" =
+    rawCat && CATEGORIES.includes(rawCat as AlgorithmCategory)
+      ? (rawCat as AlgorithmCategory)
+      : "All";
+
+  const [search, setSearch] = useState(initialQuery);
+  const [selectedCategory, setSelectedCategory] = useState<AlgorithmCategory | "All">(initialCategory);
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty | "All">("All");
+
+  useEffect(() => {
+    const q = searchParams.get("q") ?? "";
+    const cat = searchParams.get("category");
+    setSearch(q);
+    setSelectedCategory(
+      cat && CATEGORIES.includes(cat as AlgorithmCategory) ? (cat as AlgorithmCategory) : "All"
+    );
+  }, [searchParams]);
+
+  const updateUrlFilters = (nextSearch: string, nextCat: AlgorithmCategory | "All") => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextSearch.trim()) nextParams.set("q", nextSearch);
+    else nextParams.delete("q");
+    if (nextCat !== "All") nextParams.set("category", nextCat);
+    else nextParams.delete("category");
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const filtered = useMemo(() => {
     return ALGORITHM_META.filter((alg: AlgorithmMeta) => {
@@ -59,34 +106,33 @@ export default function Explorer() {
 
       {/* Filters */}
       <div
-        className="flex flex-col gap-6 mb-12 p-6 rounded-2xl shadow-sm"
+        className="flex flex-col gap-6 mb-12 p-6 rounded-3xl"
         style={{
-          background: "rgba(255, 255, 255, 0.85)",
-          border: "1px solid rgba(226, 232, 240, 0.9)",
-          backdropFilter: "blur(12px)"
+          background: "rgba(255, 255, 255, 0.68)",
+          border: "1px solid rgba(255, 255, 255, 0.9)",
+          boxShadow: "0 0 0 1px rgba(99, 102, 241, 0.07), 0 12px 32px -6px rgba(99, 102, 241, 0.07)",
+          backdropFilter: "blur(24px) saturate(165%)",
+          WebkitBackdropFilter: "blur(24px) saturate(165%)",
         }}
       >
         {/* Search */}
         <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" aria-hidden="true" />
           <input
             type="text"
+            aria-label="Search algorithms"
             placeholder="Search algorithms by name, category, or tag..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-11 pr-4 py-3 rounded-xl border text-sm outline-none transition-all"
+            onChange={(e) => {
+              setSearch(e.target.value);
+              updateUrlFilters(e.target.value, selectedCategory);
+            }}
+            className="w-full pl-11 pr-4 py-3 rounded-full border text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-all glass-input"
             style={{
-              background: "#F8FAFF",
-              borderColor: "rgba(226, 232, 240, 0.9)",
+              background: "rgba(255, 255, 255, 0.72)",
+              borderColor: "rgba(255, 255, 255, 0.92)",
+              boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.04), 0 0 0 1px rgba(203, 213, 225, 0.65)",
               color: "#0F172A"
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = "#6366F1";
-              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99, 102, 241, 0.15)";
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = "rgba(226, 232, 240, 0.9)";
-              e.currentTarget.style.boxShadow = "none";
             }}
           />
         </div>
@@ -97,14 +143,19 @@ export default function Explorer() {
             {(["All", ...CATEGORIES] as const).map((cat) => (
               <button
                 key={cat}
-                onClick={() => setSelectedCategory(cat as AlgorithmCategory | "All")}
+                onClick={() => {
+                  const next = cat as AlgorithmCategory | "All";
+                  setSelectedCategory(next);
+                  updateUrlFilters(search, next);
+                }}
                 className={cn(
-                  "px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all border"
+                  "px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all border backdrop-blur-md cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 )}
                 style={{
-                  background: selectedCategory === cat ? "rgba(99, 102, 241, 0.08)" : "#FFFFFF",
-                  borderColor: selectedCategory === cat ? "rgba(99, 102, 241, 0.3)" : "rgba(226, 232, 240, 0.9)",
-                  color: selectedCategory === cat ? "#6366F1" : "#64748B",
+                  background: selectedCategory === cat ? "rgba(99, 102, 241, 0.12)" : "rgba(255, 255, 255, 0.75)",
+                  borderColor: selectedCategory === cat ? "rgba(99, 102, 241, 0.35)" : "rgba(255, 255, 255, 0.92)",
+                  boxShadow: selectedCategory === cat ? "0 2px 8px rgba(99, 102, 241, 0.12)" : "0 0 0 1px rgba(203, 213, 225, 0.55)",
+                  color: selectedCategory === cat ? "#4338CA" : "#475569",
                 }}
               >
                 {cat}
@@ -113,7 +164,7 @@ export default function Explorer() {
           </div>
 
           {/* Difficulty filter */}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {(["All", ...DIFFICULTIES] as const).map((d) => {
               const isActive = selectedDifficulty === d;
               return (
@@ -121,18 +172,18 @@ export default function Explorer() {
                   key={d}
                   onClick={() => setSelectedDifficulty(d as Difficulty | "All")}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider border transition-all shadow-sm"
+                    "px-3.5 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider border transition-all backdrop-blur-md shadow-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   )}
                   style={{
                     background: isActive 
-                      ? (d === "Easy" ? "#ECFDF5" : d === "Medium" ? "#FFFBEB" : d === "Hard" ? "#FEF2F2" : "#F1F5F9")
-                      : "#FFFFFF",
+                      ? (d === "Easy" ? "rgba(236, 253, 245, 0.95)" : d === "Medium" ? "rgba(255, 251, 235, 0.95)" : d === "Hard" ? "rgba(254, 242, 242, 0.95)" : "rgba(241, 245, 249, 0.95)")
+                      : "rgba(255, 255, 255, 0.75)",
                     borderColor: isActive 
                       ? (d === "Easy" ? "#6EE7B7" : d === "Medium" ? "#FCD34D" : d === "Hard" ? "#FCA5A5" : "#94A3B8")
-                      : (d === "Easy" ? "#A7F3D0" : d === "Medium" ? "#FDE68A" : d === "Hard" ? "#FECACA" : "rgba(226, 232, 240, 0.9)"),
+                      : (d === "Easy" ? "#A7F3D0" : d === "Medium" ? "#FDE68A" : d === "Hard" ? "#FECACA" : "rgba(203, 213, 225, 0.7)"),
                     color: isActive
-                      ? (d === "Easy" ? "#059669" : d === "Medium" ? "#D97706" : d === "Hard" ? "#DC2626" : "#0F172A")
-                      : (d === "Easy" ? "#10B981" : d === "Medium" ? "#F59E0B" : d === "Hard" ? "#EF4444" : "#64748B")
+                      ? (d === "Easy" ? "#047857" : d === "Medium" ? "#B45309" : d === "Hard" ? "#B91C1C" : "#0F172A")
+                      : (d === "Easy" ? "#047857" : d === "Medium" ? "#B45309" : d === "Hard" ? "#B91C1C" : "#475569")
                   }}
                 >
                   {d}
@@ -146,7 +197,7 @@ export default function Explorer() {
       {/* Results count */}
       <div className="mb-6 flex items-center space-x-2">
         <div className="h-px flex-1" style={{ background: "rgba(226, 232, 240, 0.8)" }}></div>
-        <div className="text-[10px] font-mono tracking-widest uppercase font-bold px-4" style={{ color: "#94A3B8" }}>
+        <div className="text-[10px] font-mono tracking-widest uppercase font-bold px-4" style={{ color: "#475569" }}>
           {filtered.length} Match{filtered.length !== 1 ? "es" : ""} Found
         </div>
         <div className="h-px flex-1" style={{ background: "rgba(226, 232, 240, 0.8)" }}></div>
@@ -162,16 +213,17 @@ export default function Explorer() {
       ) : (
         <div className="text-center py-32 flex flex-col items-center">
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
-            style={{ background: "#F1F5F9", border: "1px solid #E2E8F0" }}
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 backdrop-blur-xl shadow-sm"
+            style={{ background: "rgba(255, 255, 255, 0.78)", border: "1px solid rgba(255, 255, 255, 0.92)" }}
           >
-            <Search className="w-6 h-6 text-slate-400" />
+            <Search className="w-6 h-6 text-slate-500" aria-hidden="true" />
           </div>
           <h3 className="text-xl font-bold mb-2" style={{ color: "#0F172A" }}>No algorithms found</h3>
-          <p style={{ color: "#64748B" }}>Try adjusting your filters or search query.</p>
+          <p style={{ color: "#475569" }}>Try adjusting your filters or search query.</p>
         </div>
       )}
       </div>
+      <Footer />
     </div>
   );
 }
